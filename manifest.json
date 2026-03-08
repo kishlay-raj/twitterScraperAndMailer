@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Antigravity - X Scraper & Mailer",
+  "version": "1.0",
+  "description": "Automated X (Twitter) scraping, AI summarization, and email dispatch.",
+  "permissions": [
+    "storage",
+    "scripting",
+    "alarms",
+    "identity"
+  ],
+  "host_permissions": [
+    "https://x.com/*",
+    "https://twitter.com/*",
+    "<all_urls>"
+  ],
+  "oauth2": {
+    "client_id": "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/gmail.send"
+    ]
+  },
+  "background": {
+    "service_worker": "background/service_worker.js"
+  },
+  "action": {
+    "default_popup": "popup/index.html",
+    "default_title": "Antigravity Config"
+  }
+}

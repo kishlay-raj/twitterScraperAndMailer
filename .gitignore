@@ -1,0 +1,26 @@
+# Dependency directories
+node_modules/
+
+# Python Virtual Environment
+test_env/
+venv/
+env/
+.env
+
+# Python Cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Any sensitive info
+config.json
+*.log
