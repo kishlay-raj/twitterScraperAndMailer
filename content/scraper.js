@@ -206,11 +206,30 @@ async function extractTweets(globalProcessedIds = []) {
                 if (img.src) mediaUrls.push(img.src);
             });
 
-            // Extract quoted tweet content if any
-            let quotedText = '';
-            const quoteEl = tweetEl.querySelector('[role="blockquote"], [data-testid="tweet"] [data-testid="tweet"]');
+            // Extract quoted tweet content (quote-tweets) — structured for email rendering
+            let quotedTweet = null;
+            // X nests quoted tweets inside [role="blockquote"] or as an inner [data-testid="tweet"]
+            const quoteEl = tweetEl.querySelector('[role="blockquote"]') ||
+                            tweetEl.querySelector('[data-testid="tweet"] [data-testid="tweet"]');
             if (quoteEl) {
-                quotedText = quoteEl.innerText || quoteEl.textContent;
+                const qTextEl = quoteEl.querySelector('[data-testid="tweetText"]');
+                const qNameEl = quoteEl.querySelector('[data-testid="User-Name"]');
+
+                let qAuthorName = '';
+                let qAuthorHandle = '';
+                if (qNameEl) {
+                    const nameSpan = qNameEl.querySelector('span');
+                    if (nameSpan) qAuthorName = nameSpan.textContent.trim();
+                    const handles = Array.from(qNameEl.querySelectorAll('*'))
+                        .map(el => el.textContent.trim())
+                        .filter(t => t.startsWith('@') && t.length > 1);
+                    if (handles.length > 0) qAuthorHandle = handles[0];
+                }
+
+                const qText = qTextEl ? (qTextEl.innerText || qTextEl.textContent).trim() : '';
+                if (qText || qAuthorHandle) {
+                    quotedTweet = { text: qText, authorName: qAuthorName, authorHandle: qAuthorHandle };
+                }
             }
 
             // Extract original author (useful for retweets)
@@ -248,17 +267,63 @@ async function extractTweets(globalProcessedIds = []) {
 
             const isSubscriberOnly = isSubscriberSvg || hasSubscriberText;
 
+            // Detect replies and extract parent tweet context for email rendering
+            // X renders "Replying to @handle" as text inside the tweet; the parent tweet
+            // lives in the immediately preceding [data-testid="cellInnerDiv"] sibling.
+            let replyContext = null;
+            const hasReplyingToText = Array.from(tweetEl.querySelectorAll('div, span'))
+                .some(el => el.childNodes.length === 1 &&
+                    el.textContent.trim().toLowerCase().startsWith('replying to'));
+
+            if (hasReplyingToText) {
+                // Walk up to the timeline cell that wraps this tweet
+                const cell = tweetEl.closest('[data-testid="cellInnerDiv"]');
+                const prevCell = cell && cell.previousElementSibling;
+                if (prevCell) {
+                    const parentTweetEl = prevCell.querySelector('[data-testid="tweet"]');
+                    if (parentTweetEl) {
+                        const parentTextEl = parentTweetEl.querySelector('[data-testid="tweetText"]');
+                        const parentNameEl = parentTweetEl.querySelector('[data-testid="User-Name"]');
+
+                        let parentAuthorName = '';
+                        let parentAuthorHandle = '';
+                        if (parentNameEl) {
+                            const nameNode = parentNameEl.querySelector('span');
+                            if (nameNode) parentAuthorName = nameNode.textContent.trim();
+                            const handles = Array.from(parentNameEl.querySelectorAll('*'))
+                                .map(el => el.textContent.trim())
+                                .filter(t => t.startsWith('@') && t.length > 1);
+                            if (handles.length > 0) parentAuthorHandle = handles[0];
+                        }
+
+                        const parentText = parentTextEl
+                            ? (parentTextEl.innerText || parentTextEl.textContent).trim()
+                            : '';
+
+                        if (parentText || parentAuthorHandle) {
+                            replyContext = {
+                                text: parentText,
+                                authorName: parentAuthorName,
+                                authorHandle: parentAuthorHandle
+                            };
+                            bgLog(`-> Reply context found: ${parentAuthorHandle} — "${parentText.slice(0, 60)}"`);
+                        }
+                    }
+                }
+            }
+
             tweetsData.push({
                 id: tweetId,
                 url: tweetUrl,
                 timestamp: tweetTime,
                 text,
                 mediaUrls,
-                quotedText,
-                isRetweet: isRetweet,
-                authorName: authorName,
-                authorHandle: authorHandle,
-                isSubscriberOnly: isSubscriberOnly
+                quotedTweet,   // null, or { text, authorName, authorHandle }
+                isRetweet,
+                authorName,
+                authorHandle,
+                isSubscriberOnly,
+                replyContext   // null if not a reply, or { text, authorName, authorHandle }
             });
 
             processedTweetIds.add(tweetId);

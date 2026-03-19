@@ -395,11 +395,50 @@ async function processAndDispatch(payload) {
 
                 ${t.isRetweet ? `<div style="font-size:12px; color:#10b981; font-weight:700; margin-bottom:4px;">🔁 Reposted from ${t.authorName} (${t.authorHandle})</div>` : ''}
 
+                ${t.replyContext ? `
+                <!-- Quoted parent tweet for reply context -->
+                <div style="border-left:3px solid #d1d5db; border-radius:0 6px 6px 0;
+                            background:#f9fafb; padding:10px 12px; margin-bottom:10px;">
+                  <div style="font-size:11px; color:#6b7280; margin-bottom:5px; font-weight:600;">
+                    ↩️ Replying to
+                    <span style="color:#6366f1;">${t.replyContext.authorHandle || t.replyContext.authorName || 'unknown'}</span>
+                  </div>
+                  <div style="font-size:13px; color:#374151; line-height:1.5; word-break:break-word;
+                              font-style:italic;">
+                    ${t.replyContext.text
+                        ? (t.replyContext.text.length > 280
+                            ? t.replyContext.text.slice(0, 280) + '…'
+                            : t.replyContext.text)
+                        : '<span style="color:#9ca3af;">[original tweet not available]</span>'}
+                  </div>
+                </div>` : ''}
+
                 <!-- Tweet text -->
-                <div style="font-size:14px; color:#111827; line-height:1.6; margin-bottom:8px; word-break:break-word;">
+                <div style="font-size:14px; color:#111827; line-height:1.6; margin-bottom:${t.quotedTweet ? '10px' : '8px'}; word-break:break-word;">
                   ${t.text}
                 </div>
 
+                ${t.quotedTweet ? `
+                <!-- Quoted tweet card -->
+                <div style="border:1px solid #e0e7ff; border-left:3px solid #6366f1;
+                            border-radius:0 8px 8px 0; background:#f8f7ff;
+                            padding:10px 14px; margin-bottom:10px;">
+                  <div style="font-size:11px; color:#6366f1; font-weight:700;
+                              margin-bottom:5px; letter-spacing:0.3px;">
+                    🔗 Quoted tweet
+                    ${t.quotedTweet.authorHandle || t.quotedTweet.authorName
+                        ? `· <span style="color:#4f46e5;">${t.quotedTweet.authorName || ''}${t.quotedTweet.authorHandle ? ' ' + t.quotedTweet.authorHandle : ''}</span>`
+                        : ''}
+                  </div>
+                  <div style="font-size:13px; color:#374151; line-height:1.55;
+                              word-break:break-word;">
+                    ${t.quotedTweet.text
+                        ? (t.quotedTweet.text.length > 280
+                            ? t.quotedTweet.text.slice(0, 280) + '…'
+                            : t.quotedTweet.text)
+                        : '<span style="color:#9ca3af; font-style:italic;">[quoted tweet text not available]</span>'}
+                  </div>
+                </div>` : ''}
                 ${t.mediaUrls && t.mediaUrls.length > 0 ? `
                 <div style="margin-bottom:8px;">
                   ${t.mediaUrls.map(url => `<img src="${url}" alt="media" width="100%" style="max-width:260px; border-radius:8px; display:inline-block; margin:0 4px 4px 0;" />`).join('')}
