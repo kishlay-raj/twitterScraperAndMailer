@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-const { extractTweets } = require('../content/scraper.js');
+const { extractTweets, extractProfileMeta } = require('../content/scraper.js');
 const { randomDelay, humanScroll } = require('../content/utils.js');
 
 // Mock utils by attaching directly to the global object (since in Chrome they share the same global context)
@@ -46,7 +46,7 @@ describe('X Profile Scraper', () => {
             </div>
         `;
 
-        const tweets = await extractTweets();
+        const { tweets } = await extractTweets();
 
         expect(tweets).toHaveLength(1);
         expect(tweets[0].id).toBe('123456789');
@@ -69,7 +69,7 @@ describe('X Profile Scraper', () => {
             </div>
         `;
 
-        const tweets = await extractTweets();
+        const { tweets } = await extractTweets();
 
         expect(tweets).toHaveLength(1);
         expect(tweets[0].isRetweet).toBe(true);
@@ -90,7 +90,7 @@ describe('X Profile Scraper', () => {
             </div>
         `;
 
-        const tweets = await extractTweets();
+        const { tweets } = await extractTweets();
 
         expect(tweets).toHaveLength(1);
         expect(tweets[0].id).toBe('222222222');
@@ -113,10 +113,29 @@ describe('X Profile Scraper', () => {
             </div>
         `;
 
-        const tweets = await extractTweets();
+        const { tweets } = await extractTweets();
 
         expect(tweets).toHaveLength(1);
         expect(tweets[0].id).toBe('new');
         expect(tweets[0].text).toBe('New reply');
+    });
+
+    test('should extract profile metadata (avatar, name, handle) from page header', async () => {
+        // Pass the pathname explicitly to bypass window.location (not mockable in jsdom)
+        document.body.innerHTML = `
+            <a href="/Minakshishriyan/photo">
+                <img src="https://pbs.twimg.com/profile_images/123/photo.jpg" />
+            </a>
+            <div data-testid="UserName">
+                <span>Minakshi Shriyan</span>
+                <span>@Minakshishriyan</span>
+            </div>
+        `;
+
+        const profileMeta = extractProfileMeta('/Minakshishriyan');
+
+        expect(profileMeta.profileHandle).toBe('@Minakshishriyan');
+        expect(profileMeta.profileName).toBe('Minakshi Shriyan');
+        expect(profileMeta.profileAvatarUrl).toBe('https://pbs.twimg.com/profile_images/123/photo.jpg');
     });
 });

@@ -14,8 +14,107 @@ function bgLog(message) {
     }
 }
 
+/**
+ * Extract profile-level metadata (avatar, name, handle) from the page.
+ * MUST be called before scrolling — X's virtual DOM recycles the profile header
+ * once it scrolls out of view.
+ *
+ * Handle is derived from window.location.pathname (always reliable).
+ * Avatar is taken from the a[href="/<handle>/photo"] anchor that X renders in the header.
+ */
+function extractProfileMeta(pagePathname) {
+    let profileName = '';
+    let profileHandle = '';
+    let profileAvatarUrl = '';
+
+    // Helper: reject blob: URLs — they only live in the current tab's memory and can't be emailed
+    const isUsable = (url) => url && !url.startsWith('blob:') && url.startsWith('http');
+
+    // Step 1: Handle from page URL — most reliable source.
+    // Accept an explicit pathname for testability; fall back to window.location.pathname in browser.
+    const pathname = pagePathname || (typeof window !== 'undefined' && window.location ? window.location.pathname : '/');
+    const pathParts = pathname.split('/').filter(Boolean);
+    if (pathParts.length > 0) {
+        profileHandle = '@' + pathParts[0]; // e.g. @Minakshishriyan
+    }
+
+    const handle = profileHandle.replace('@', '');
+
+    if (handle) {
+        // Step 2a: Look for the anchor that links to /<handle>/photo — X always renders this
+        const avatarLink = document.querySelector(`a[href="/${handle}/photo"]`);
+        if (avatarLink) {
+            const img = avatarLink.querySelector('img');
+            if (img) {
+                const candidate = img.src || (img.srcset ? img.srcset.split(/\s/)[0] : '');
+                if (isUsable(candidate)) profileAvatarUrl = candidate;
+            }
+        }
+
+        // Step 2b: data-testid="UserAvatar-Container-<handle>" (case-sensitive match)
+        if (!profileAvatarUrl) {
+            const avatarContainer = document.querySelector(`[data-testid="UserAvatar-Container-${handle}"]`);
+            if (avatarContainer) {
+                const img = avatarContainer.querySelector('img');
+                if (img) {
+                    const candidate = img.src || (img.srcset ? img.srcset.split(/\s/)[0] : '');
+                    if (isUsable(candidate)) profileAvatarUrl = candidate;
+                }
+            }
+        }
+    }
+
+    // Step 2c: Any UserAvatar-Container-* element (case-insensitive handle fallback)
+    if (!profileAvatarUrl) {
+        const containers = document.querySelectorAll('[data-testid^="UserAvatar-Container-"]');
+        for (const c of containers) {
+            const img = c.querySelector('img');
+            const candidate = img && (img.src || (img.srcset ? img.srcset.split(/\s/)[0] : ''));
+            if (isUsable(candidate)) {
+                profileAvatarUrl = candidate;
+                break;
+            }
+        }
+    }
+
+    // Step 2d: Any img with pbs.twimg.com/profile_images in src
+    if (!profileAvatarUrl) {
+        const imgs = document.querySelectorAll('img[src*="profile_images"]');
+        for (const img of imgs) {
+            if (isUsable(img.src)) { profileAvatarUrl = img.src; break; }
+        }
+    }
+
+    // Step 2e: Guaranteed fallback — unavatar.io serves Twitter profile pics by handle
+    // This always works as long as we have the handle, even if DOM scraping failed entirely.
+    if (!profileAvatarUrl && handle) {
+        profileAvatarUrl = `https://unavatar.io/twitter/${handle}`;
+    }
+
+    // Step 3: Display name from the profile header UserName element
+    const headerUserNameEl = document.querySelector('[data-testid="UserName"]');
+    if (headerUserNameEl) {
+        const spans = headerUserNameEl.querySelectorAll('span');
+        spans.forEach(span => {
+            const txt = span.textContent.trim();
+            if (txt && !txt.startsWith('@') && !profileName) profileName = txt;
+        });
+    }
+
+    bgLog(`Profile meta: name="${profileName}", handle="${profileHandle}", avatar=${profileAvatarUrl ? profileAvatarUrl.slice(0, 60) + '...' : 'NOT FOUND'}`);
+    return { profileName, profileHandle, profileAvatarUrl };
+}
+
+
 async function extractTweets(globalProcessedIds = []) {
     const tweetsData = [];
+
+    // ⚡ Extract profile metadata FIRST — before any scrolling.
+    // X's virtual DOM recycles the profile header once it scrolls out of view,
+    // so we MUST read it while the page is still at the top.
+    // We read the pathname once here so it can also be injected in tests.
+    const pagePathname = (typeof window !== 'undefined' && window.location) ? window.location.pathname : '/';
+    const profileMeta = extractProfileMeta(pagePathname);
 
     // Seed the set with previously sent tweet IDs so we immediately skip them
     const processedTweetIds = new Set(globalProcessedIds);
@@ -178,7 +277,7 @@ async function extractTweets(globalProcessedIds = []) {
     }
 
     bgLog(`Scraping complete. Extracted ${tweetsData.length} tweets.`);
-    return tweetsData;
+    return { tweets: tweetsData, profileMeta };
 }
 
 // Listener for background script
@@ -187,7 +286,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
         if (request.action === "start_extraction") {
             // Run extraction and reply
             extractTweets(request.globalProcessedIds || [])
-                .then(data => sendResponse({ success: true, data }))
+                .then(result => sendResponse({ success: true, data: result.tweets, profileMeta: result.profileMeta }))
                 .catch(err => sendResponse({ success: false, error: err.message }));
 
             return true; // Keep message channel open for async response
@@ -197,5 +296,5 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
 
 // Export for Node.js Testing
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { extractTweets };
+    module.exports = { extractTweets, extractProfileMeta };
 }
