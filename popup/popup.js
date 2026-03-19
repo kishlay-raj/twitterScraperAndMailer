@@ -115,6 +115,16 @@ function renderState() {
           <input type="text" class="new-profile-url" placeholder="https://x.com/username">
             <button class="btn-add-profile" data-cat-id="${category.id}">Add</button>
         </div>
+        <div class="extra-emails-group">
+          <label class="extra-emails-label">📧 Extra Recipients for this category:</label>
+          <input
+            type="text"
+            class="cat-extra-emails"
+            data-cat-id="${category.id}"
+            value="${category.extraEmails || ''}"
+            placeholder="extra@example.com, another@example.com"
+          />
+        </div>
       </div>
     `;
 
@@ -255,6 +265,18 @@ function attachEventListeners() {
       const profile = category.profiles.find(p => p.url === profileUrl);
       profile.isActive = e.target.checked;
       saveState();
+    });
+  });
+
+  // Save extra recipient emails for a category on blur
+  document.querySelectorAll('.cat-extra-emails').forEach(input => {
+    input.addEventListener('blur', (e) => {
+      const catId = e.target.getAttribute('data-cat-id');
+      const category = state.categories.find(c => c.id === catId);
+      if (category) {
+        category.extraEmails = e.target.value.trim();
+        saveState();
+      }
     });
   });
 }

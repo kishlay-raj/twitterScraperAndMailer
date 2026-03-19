@@ -80,7 +80,11 @@ async function startScrapingSequence() {
         if (category.isActive === false) continue;
 
         if (!compilationPayload[category.name]) {
-            compilationPayload[category.name] = [];
+            // Store extra emails alongside the profiles array for this category
+            compilationPayload[category.name] = {
+                extraEmails: category.extraEmails || '',
+                profiles: []
+            };
         }
         for (const profile of category.profiles) {
             // Default to true if isActive is missing for backward compatibility
@@ -133,11 +137,11 @@ async function startScrapingSequence() {
                 novelTweets = novelTweets.filter(t => !t.isRetweet);
             }
 
-            compilationPayload[profile.category].push({
+            compilationPayload[profile.category].profiles.push({
                 url: profile.url,
                 profileMeta,
                 enableAiSummary: profile.enableAiSummary,
-                scrapeRetweets: profile.scrapeRetweets !== false, // Defaults to true if missing
+                scrapeRetweets: profile.scrapeRetweets !== false,
                 tweets: novelTweets
             });
 
@@ -145,7 +149,7 @@ async function startScrapingSequence() {
             await new Promise(r => setTimeout(r, 2000));
         } catch (err) {
             console.error(`Failed to scrape ${profile.url}:`, err);
-            compilationPayload[profile.category].push({
+            compilationPayload[profile.category].profiles.push({
                 url: profile.url,
                 profileMeta: {},
                 enableAiSummary: profile.enableAiSummary,
@@ -229,7 +233,8 @@ async function processAndDispatch(payload) {
         return;
     }
 
-    for (const [categoryName, profiles] of Object.entries(payload)) {
+    for (const [categoryName, categoryData] of Object.entries(payload)) {
+        const { extraEmails, profiles } = categoryData;
 
         // Sort: profiles with tweets first, "no new updates" profiles last
         const sortedProfiles = [...profiles].sort((a, b) => {
@@ -479,9 +484,21 @@ async function processAndDispatch(payload) {
 
         console.log(`Compilation complete for ${categoryName}. Dispatching email...`);
         const emailSubject = `Curation: ${categoryName}`;
+
+        // 1. Send to global recipient
         await sendEmailPayload(categoryHtml, recipientEmail, webhookUrl, emailSubject);
 
-        // Wait 1.5s between API calls to prevent tripping Apps Script concurrent webhook limits
+        // 2. Send to category-specific extra recipients (if any)
+        if (extraEmails) {
+            const extraList = extraEmails.split(',').map(e => e.trim()).filter(Boolean);
+            for (const extraEmail of extraList) {
+                await new Promise(r => setTimeout(r, 1000)); // brief gap between sends
+                console.log(`Sending category email also to extra recipient: ${extraEmail}`);
+                await sendEmailPayload(categoryHtml, extraEmail, webhookUrl, emailSubject);
+            }
+        }
+
+        // Wait 1.5s between categories to avoid concurrent webhook limits
         await new Promise(r => setTimeout(r, 1500));
     } // End category loop
 }
