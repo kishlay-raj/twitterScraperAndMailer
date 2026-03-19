@@ -231,6 +231,15 @@ async function processAndDispatch(payload) {
 
     for (const [categoryName, profiles] of Object.entries(payload)) {
 
+        // Sort: profiles with tweets first, "no new updates" profiles last
+        const sortedProfiles = [...profiles].sort((a, b) => {
+            const aHasContent = a.error || a.tweets.length > 0;
+            const bHasContent = b.error || b.tweets.length > 0;
+            if (aHasContent && !bHasContent) return -1;
+            if (!aHasContent && bHasContent) return 1;
+            return 0;
+        });
+
         // ── Outer wrapper: max 600px, centered, white background ──────────────────
         let categoryHtml = `
         <div style="background:#f4f4f5; padding:24px 12px; font-family:Arial,Helvetica,sans-serif;">
@@ -261,7 +270,7 @@ async function processAndDispatch(payload) {
 
         `;
 
-        for (const profile of profiles) {
+        for (const profile of sortedProfiles) {
             const meta = profile.profileMeta || {};
             const displayName = meta.profileName || '';
             const handle = meta.profileHandle || '';
