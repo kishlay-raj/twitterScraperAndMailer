@@ -191,20 +191,24 @@ async function scrapeProfile(url, globalProcessedIds = [], settings = {}) {
                         target: { tabId: tab.id },
                         files: ['content/utils.js', 'content/scraper.js']
                     }).then(() => {
-                        // Give DOM a bit more time to render tweets
-                        setTimeout(() => {
-                            chrome.tabs.sendMessage(tab.id, { action: "start_extraction", globalProcessedIds, settings }, (response) => {
-                                chrome.tabs.remove(tab.id); // Close tab
-                                if (chrome.runtime.lastError) {
-                                    return reject(chrome.runtime.lastError);
-                                }
-                                if (response && response.success) {
-                                    resolve({ tweets: response.data, profileMeta: response.profileMeta || {} });
-                                } else {
-                                    reject(new Error(response?.error || 'Unknown error'));
-                                }
-                            });
-                        }, 3000);
+                        // Briefly focus the tab to force Chrome to render/load images
+                        // (inactive tabs don't load images due to lazy rendering)
+                        chrome.tabs.update(tab.id, { active: true }, () => {
+                            // Give DOM time to render tweets AND load images
+                            setTimeout(() => {
+                                chrome.tabs.sendMessage(tab.id, { action: "start_extraction", globalProcessedIds, settings }, (response) => {
+                                    chrome.tabs.remove(tab.id); // Close tab
+                                    if (chrome.runtime.lastError) {
+                                        return reject(chrome.runtime.lastError);
+                                    }
+                                    if (response && response.success) {
+                                        resolve({ tweets: response.data, profileMeta: response.profileMeta || {} });
+                                    } else {
+                                        reject(new Error(response?.error || 'Unknown error'));
+                                    }
+                                });
+                            }, 3000);
+                        });
                     }).catch(err => {
                         chrome.tabs.remove(tab.id);
                         reject(err);
@@ -376,9 +380,12 @@ async function processAndDispatch(payload) {
             <td style="padding:10px 28px 20px 28px;">
             `;
 
-            profile.tweets.forEach((t, idx) => {
+            const maxDisplayTweets = 30;
+            const tweetsToDisplay = profile.tweets.slice(0, maxDisplayTweets);
+            
+            tweetsToDisplay.forEach((t, idx) => {
                 const dateStr = new Date(t.timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
-                const isLast = idx === profile.tweets.length - 1;
+                const isLast = idx === tweetsToDisplay.length - 1;
 
                 const borderBottom = isLast ? '' : 'border-bottom:1px solid #f3f4f6;';
                 const bgColor = t.isSubscriberOnly ? '#fdf2f8' : '#ffffff';
@@ -463,6 +470,16 @@ async function processAndDispatch(payload) {
               </div>
                 `;
             });
+            
+            if (profile.tweets.length > maxDisplayTweets) {
+                categoryHtml += `
+                <div style="padding: 12px 0; text-align: center; border-top: 1px solid #e5e7eb;">
+                  <a href="${profile.url}" style="font-size:13px; color:#6366f1; font-weight:600; text-decoration:none;">
+                    + ${profile.tweets.length - maxDisplayTweets} more tweets... View Full Profile
+                  </a>
+                </div>
+                `;
+            }
 
             categoryHtml += `
             </td>

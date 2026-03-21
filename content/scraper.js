@@ -240,30 +240,62 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
             const mediaUrls = [];
             const qMediaUrls = [];
 
-            // Gather all elements that might have media
-            const allMediaNodes = Array.from(tweetEl.querySelectorAll('img, video, div[style*="background-image"]'));
+            // 1. Collect from tweetPhoto containers (native uploads) and card images (link previews)
+            const photoContainers = Array.from(tweetEl.querySelectorAll(
+                '[data-testid="tweetPhoto"] img, [data-testid="card.layoutLarge.media"] img, [data-testid="card.layoutSmall.media"] img, video'
+            ));
+
+            // 2. Also collect any img inside a link that points to /photo/ (fallback for non-standard layouts)
+            const photoLinkImgs = Array.from(tweetEl.querySelectorAll('a[href*="/photo/"] img'));
+            
+            // 3. Also check for background-image divs (some link preview cards)
+            const bgImageDivs = Array.from(tweetEl.querySelectorAll('div[style*="background-image"]'));
+
+            const allMediaNodes = [...new Set([...photoContainers, ...photoLinkImgs, ...bgImageDivs])];
 
             for (const node of allMediaNodes) {
                 let src = '';
 
-                if (node.tagName.toLowerCase() === 'img' || node.tagName.toLowerCase() === 'video') {
-                    // videos might have their thumbnail in the 'poster' attribute
-                    src = node.src || node.getAttribute('poster') || '';
+                if (node.tagName.toLowerCase() === 'video') {
+                    src = node.getAttribute('poster') || node.src || '';
+                } else if (node.tagName.toLowerCase() === 'img') {
+                    // X often lazy-loads: try currentSrc first, then src, then srcset
+                    src = node.currentSrc || node.src || '';
+                    
+                    // If src is a blob or data URI, try to get the real URL from srcset
+                    if (!src || src.startsWith('blob:') || src.startsWith('data:')) {
+                        const srcset = node.getAttribute('srcset') || '';
+                        if (srcset) {
+                            // srcset format: "url1 1x, url2 2x" – grab the last (highest res) one
+                            const parts = srcset.split(',').map(s => s.trim().split(/\s+/)[0]);
+                            src = parts[parts.length - 1] || '';
+                        }
+                    }
+                    
+                    // Skip tiny images (UI icons, badges, etc.) — real tweet images are > 100px
+                    if (node.naturalWidth && node.naturalWidth < 50) continue;
                 } else {
-                    // Extract URL from background-image: url("...")
+                    // div with background-image
                     const style = node.getAttribute('style') || '';
                     const match = style.match(/url\(['"]?(.*?)['"]?\)/);
                     if (match && match[1]) src = match[1];
                 }
 
-                if (src && !src.includes('/profile_images/') && !src.includes('/emoji/') && !src.includes('/hashflag/')) {
-                    if (qNameEl && (qNameEl.compareDocumentPosition(node) & 4)) {
-                        if (!qMediaUrls.includes(src)) qMediaUrls.push(src);
-                    } else {
-                        if (!mediaUrls.includes(src)) mediaUrls.push(src);
-                    }
+                // Filter out non-content URLs
+                if (!src || src.startsWith('blob:') || src.startsWith('data:')) continue;
+                if (src.includes('/profile_images/') || src.includes('/emoji/') || src.includes('/hashflag/')) continue;
+                // Skip SVG icons served from abs.twimg.com
+                if (src.includes('abs.twimg.com')) continue;
+
+                if (qNameEl && (qNameEl.compareDocumentPosition(node) & 4)) {
+                    if (!qMediaUrls.includes(src)) qMediaUrls.push(src);
+                } else {
+                    if (!mediaUrls.includes(src)) mediaUrls.push(src);
                 }
             }
+
+            bgLog(`  -> Media found: ${mediaUrls.length} main, ${qMediaUrls.length} quoted. URLs: ${JSON.stringify(mediaUrls)}`);
+
 
             // Construct quoted tweet object
             let quotedTweet = null;
@@ -394,7 +426,11 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
             addedNewTweetThisCycle = true;
         }
 
-
+        // Check if we hit the maximum attempts or the 4 minute safety limit to prevent Chrome Extension port channel disconnects
+        if ((Date.now() - startTime) > 4 * 60 * 1000) {
+            bgLog(`Scraping interrupted: Approaching Chrome 5-minute timeout. Sending available data.`);
+            break;
+        }
         if (!addedNewTweetThisCycle) {
             attemptsWithNoNewTweets++;
         } else {
