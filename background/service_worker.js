@@ -416,6 +416,10 @@ async function processAndDispatch(payload) {
                             : t.replyContext.text)
                         : '<span style="color:#9ca3af;">[original tweet not available]</span>'}
                   </div>
+                  ${t.replyContext.mediaUrls && t.replyContext.mediaUrls.length > 0 ? `
+                  <div style="margin-top:8px;">
+                    ${t.replyContext.mediaUrls.map(url => `<img src="${url}" alt="quoted media" width="100%" style="max-width:200px; border-radius:6px; display:inline-block; margin:0 4px 4px 0;" />`).join('')}
+                  </div>` : ''}
                 </div>` : ''}
 
                 <!-- Tweet text -->
@@ -443,6 +447,10 @@ async function processAndDispatch(payload) {
                             : t.quotedTweet.text)
                         : '<span style="color:#9ca3af; font-style:italic;">[quoted tweet text not available]</span>'}
                   </div>
+                  ${t.quotedTweet.mediaUrls && t.quotedTweet.mediaUrls.length > 0 ? `
+                  <div style="margin-top:8px;">
+                    ${t.quotedTweet.mediaUrls.map(url => `<img src="${url}" alt="quoted media" width="100%" style="max-width:180px; border-radius:6px; display:inline-block; margin:0 4px 4px 0;" />`).join('')}
+                  </div>` : ''}
                 </div>` : ''}
                 ${t.mediaUrls && t.mediaUrls.length > 0 ? `
                 <div style="margin-bottom:8px;">

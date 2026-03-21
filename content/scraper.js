@@ -139,6 +139,7 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
         // 1. Find all tweet elements on the screen
         const tweetElements = document.querySelectorAll('[data-testid="tweet"]');
         let addedNewTweetThisCycle = false;
+        let lastSkippedParentTweetCell = null;
 
         bgLog(`Analyzing ${tweetElements.length} tweets on screen...`);
         for (const tweetEl of tweetElements) {
@@ -206,57 +207,84 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
                 }
             }
 
-            // Extract text content
-            const textEl = tweetEl.querySelector('[data-testid="tweetText"]');
-            const text = textEl ? (textEl.innerText || textEl.textContent) : '';
-
-            // Extract images/media URLs
-            const mediaUrls = [];
-            const imgElements = tweetEl.querySelectorAll('[data-testid="tweetPhoto"] img, video');
-            imgElements.forEach(img => {
-                if (img.src) mediaUrls.push(img.src);
-            });
-
-            // Extract quoted tweet content (quote-tweets) — structured for email rendering
-            let quotedTweet = null;
-            // X nests quoted tweets inside [role="blockquote"] or as an inner [data-testid="tweet"]
-            const quoteEl = tweetEl.querySelector('[role="blockquote"]') ||
-                tweetEl.querySelector('[data-testid="tweet"] [data-testid="tweet"]');
-            if (quoteEl) {
-                const qTextEl = quoteEl.querySelector('[data-testid="tweetText"]');
-                const qNameEl = quoteEl.querySelector('[data-testid="User-Name"]');
-
-                let qAuthorName = '';
-                let qAuthorHandle = '';
-                if (qNameEl) {
-                    const nameSpan = qNameEl.querySelector('span');
-                    if (nameSpan) qAuthorName = nameSpan.textContent.trim();
-                    const handles = Array.from(qNameEl.querySelectorAll('*'))
-                        .map(el => el.textContent.trim())
-                        .filter(t => t.startsWith('@') && t.length > 1);
-                    if (handles.length > 0) qAuthorHandle = handles[0];
-                }
-
-                const qText = qTextEl ? (qTextEl.innerText || qTextEl.textContent).trim() : '';
-                if (qText || qAuthorHandle) {
-                    quotedTweet = { text: qText, authorName: qAuthorName, authorHandle: qAuthorHandle };
-                }
-            }
+            // Extract all User-Names. Quote tweets have their own User-Name block inside the main tweet.
+            const userNames = Array.from(tweetEl.querySelectorAll('[data-testid="User-Name"]'));
+            const qNameEl = userNames.length > 1 ? userNames[1] : null;
 
             // Extract original author (useful for retweets)
             let authorName = 'Unknown';
             let authorHandle = 'Unknown';
-            const userNameEl = tweetEl.querySelector('[data-testid="User-Name"]');
+            const userNameEl = userNames.length > 0 ? userNames[0] : null;
             if (userNameEl) {
-                // Name is usually the first span with text
                 const nameNode = userNameEl.querySelector('span');
                 if (nameNode) authorName = nameNode.textContent.trim();
-
-                // Handle starts with @
                 const handles = Array.from(userNameEl.querySelectorAll('*'))
                     .map(el => el.textContent.trim())
                     .filter(text => text.startsWith('@') && text.length > 1);
                 if (handles.length > 0) authorHandle = handles[0];
+            }
+
+            // Extract text content and quoted text content
+            let text = '';
+            let qText = '';
+            const allTexts = Array.from(tweetEl.querySelectorAll('[data-testid="tweetText"]'));
+            for (const txtEl of allTexts) {
+                if (qNameEl && (qNameEl.compareDocumentPosition(txtEl) & 4)) {
+                    qText = (txtEl.innerText || txtEl.textContent).trim();
+                } else {
+                    text = (txtEl.innerText || txtEl.textContent).trim();
+                }
+            }
+
+            // Extract images/media URLs and quoted media URLs
+            const mediaUrls = [];
+            const qMediaUrls = [];
+
+            // Gather all elements that might have media
+            const allMediaNodes = Array.from(tweetEl.querySelectorAll('img, video, div[style*="background-image"]'));
+
+            for (const node of allMediaNodes) {
+                let src = '';
+
+                if (node.tagName.toLowerCase() === 'img' || node.tagName.toLowerCase() === 'video') {
+                    // videos might have their thumbnail in the 'poster' attribute
+                    src = node.src || node.getAttribute('poster') || '';
+                } else {
+                    // Extract URL from background-image: url("...")
+                    const style = node.getAttribute('style') || '';
+                    const match = style.match(/url\(['"]?(.*?)['"]?\)/);
+                    if (match && match[1]) src = match[1];
+                }
+
+                if (src && !src.includes('/profile_images/') && !src.includes('/emoji/') && !src.includes('/hashflag/')) {
+                    if (qNameEl && (qNameEl.compareDocumentPosition(node) & 4)) {
+                        if (!qMediaUrls.includes(src)) qMediaUrls.push(src);
+                    } else {
+                        if (!mediaUrls.includes(src)) mediaUrls.push(src);
+                    }
+                }
+            }
+
+            // Construct quoted tweet object
+            let quotedTweet = null;
+            if (qNameEl) {
+                let qAuthorName = '';
+                let qAuthorHandle = '';
+                const nameSpan = qNameEl.querySelector('span');
+                if (nameSpan) qAuthorName = nameSpan.textContent.trim();
+                const handles = Array.from(qNameEl.querySelectorAll('*'))
+                    .map(el => el.textContent.trim())
+                    .filter(t => t.startsWith('@') && t.length > 1);
+                if (handles.length > 0) qAuthorHandle = handles[0];
+
+                if (qText || qAuthorHandle || qMediaUrls.length > 0) {
+                    quotedTweet = {
+                        text: qText,
+                        authorName: qAuthorName,
+                        authorHandle: qAuthorHandle,
+                        mediaUrls: qMediaUrls
+                    };
+                }
             }
 
             const isRetweet = socialContextText.toLowerCase().includes('reposted') || tweetEl.innerHTML.includes('reposted');
@@ -268,6 +296,7 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
 
                 if (!isTargetProfileTweet && !isRetweet) {
                     bgLog(`-> Skipping: Tweet URL (${tweetUrl}) does not match target profile ${profileMeta.profileHandle}. Probably a parent thread tweet.`);
+                    lastSkippedParentTweetCell = tweetEl.closest('[data-testid="cellInnerDiv"]');
                     if (tweetId !== 'Unknown ID') processedTweetIds.add(tweetId);
                     addedNewTweetThisCycle = true; // Prevents the scraper from thinking it stalled
                     continue;
@@ -295,14 +324,14 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
             // X renders "Replying to @handle" as text inside the tweet; the parent tweet
             // lives in the immediately preceding [data-testid="cellInnerDiv"] sibling.
             let replyContext = null;
-            const hasReplyingToText = Array.from(tweetEl.querySelectorAll('div, span'))
-                .some(el => el.childNodes.length === 1 &&
-                    el.textContent.trim().toLowerCase().startsWith('replying to'));
+            const currentCell = tweetEl.closest('[data-testid="cellInnerDiv"]');
+            const hasReplyingToText = (tweetEl.innerText || tweetEl.textContent || '').toLowerCase().includes('replying to');
 
-            if (hasReplyingToText) {
+            const isStructurallyAdjacentReply = lastSkippedParentTweetCell && currentCell && currentCell.previousElementSibling === lastSkippedParentTweetCell;
+
+            if (hasReplyingToText || isStructurallyAdjacentReply) {
                 // Walk up to the timeline cell that wraps this tweet
-                const cell = tweetEl.closest('[data-testid="cellInnerDiv"]');
-                const prevCell = cell && cell.previousElementSibling;
+                const prevCell = isStructurallyAdjacentReply ? lastSkippedParentTweetCell : (currentCell && currentCell.previousElementSibling);
                 if (prevCell) {
                     const parentTweetEl = prevCell.querySelector('[data-testid="tweet"]');
                     if (parentTweetEl) {
@@ -324,17 +353,28 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
                             ? (parentTextEl.innerText || parentTextEl.textContent).trim()
                             : '';
 
-                        if (parentText || parentAuthorHandle) {
+                        const parentMedia = [];
+                        const parentImgElements = parentTweetEl.querySelectorAll('[data-testid="tweetPhoto"] img, video');
+                        parentImgElements.forEach(img => {
+                            if (img.src) parentMedia.push(img.src);
+                        });
+
+                        if (parentText || parentAuthorHandle || parentMedia.length > 0) {
                             replyContext = {
                                 text: parentText,
                                 authorName: parentAuthorName,
-                                authorHandle: parentAuthorHandle
+                                authorHandle: parentAuthorHandle,
+                                mediaUrls: parentMedia
                             };
                             bgLog(`-> Reply context found: ${parentAuthorHandle} — "${parentText.slice(0, 60)}"`);
                         }
                     }
                 }
             }
+
+            // Clear the structurally adjacent tracker since this tweet was kept.
+            // Any following tweet would be independent unless a new parent tweet is explicitly skipped.
+            lastSkippedParentTweetCell = null;
 
             tweetsData.push({
                 id: tweetId,
