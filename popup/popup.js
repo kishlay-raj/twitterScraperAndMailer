@@ -7,7 +7,9 @@ let state = {
     recipientEmail: '',
     allowDuplicates: false,
     enableSchedule: false,
-    scheduleTime: '08:00'
+    scheduleTime: '08:00',
+    scrapeDuration: 24,
+    scrapeDurationUnit: 'hours'
   }
 };
 
@@ -39,6 +41,8 @@ async function loadState() {
     document.getElementById('allow-duplicates').checked = state.settings.allowDuplicates || false;
     document.getElementById('enable-schedule').checked = state.settings.enableSchedule || false;
     document.getElementById('schedule-time').value = state.settings.scheduleTime || '08:00';
+    document.getElementById('scrape-duration').value = state.settings.scrapeDuration || 24;
+    document.getElementById('scrape-duration-unit').value = state.settings.scrapeDurationUnit || 'hours';
   }
 }
 
@@ -116,7 +120,10 @@ function renderState() {
             <button class="btn-add-profile" data-cat-id="${category.id}">Add</button>
         </div>
         <div class="extra-emails-group">
-          <label class="extra-emails-label">📧 Extra Recipients for this category:</label>
+          <label class="extra-emails-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" class="cat-extra-emails-toggle" data-cat-id="${category.id}" ${category.enableExtraEmails !== false ? 'checked' : ''}>
+            📧 Extra Recipients for this category:
+          </label>
           <input
             type="text"
             class="cat-extra-emails"
@@ -268,6 +275,18 @@ function attachEventListeners() {
     });
   });
 
+  // Toggle Extra Emails Enabled Status
+  document.querySelectorAll('.cat-extra-emails-toggle').forEach(checkbox => {
+    checkbox.addEventListener('change', (e) => {
+      const catId = e.target.getAttribute('data-cat-id');
+      const category = state.categories.find(c => c.id === catId);
+      if (category) {
+        category.enableExtraEmails = e.target.checked;
+        saveState();
+      }
+    });
+  });
+
   // Save extra recipient emails for a category on blur
   document.querySelectorAll('.cat-extra-emails').forEach(input => {
     input.addEventListener('blur', (e) => {
@@ -346,6 +365,8 @@ saveSettingsBtn.addEventListener('click', () => {
   state.settings.allowDuplicates = document.getElementById('allow-duplicates').checked;
   state.settings.enableSchedule = document.getElementById('enable-schedule').checked;
   state.settings.scheduleTime = document.getElementById('schedule-time').value;
+  state.settings.scrapeDuration = parseInt(document.getElementById('scrape-duration').value, 10) || 24;
+  state.settings.scrapeDurationUnit = document.getElementById('scrape-duration-unit').value || 'hours';
 
   saveState().then(() => {
     statusMessage.textContent = 'Settings saved. Initiating scraping...';

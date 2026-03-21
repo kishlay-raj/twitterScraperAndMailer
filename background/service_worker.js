@@ -82,7 +82,7 @@ async function startScrapingSequence() {
         if (!compilationPayload[category.name]) {
             // Store extra emails alongside the profiles array for this category
             compilationPayload[category.name] = {
-                extraEmails: category.extraEmails || '',
+                extraEmails: category.enableExtraEmails !== false ? (category.extraEmails || '') : '',
                 profiles: []
             };
         }
@@ -115,7 +115,7 @@ async function startScrapingSequence() {
 
             // Bypass pre-loading skip IDs into the content script if duplicates are allowed
             const globalProcessedIdsToPass = allowDuplicates ? [] : globalProcessedIds;
-            const scrapeResult = await scrapeProfile(targetUrl, globalProcessedIdsToPass);
+            const scrapeResult = await scrapeProfile(targetUrl, globalProcessedIdsToPass, settings);
             const rawTweets = scrapeResult.tweets || [];
             const profileMeta = scrapeResult.profileMeta || {};
 
@@ -175,7 +175,7 @@ async function startScrapingSequence() {
 }
 
 // Opens a tab, injects scripts, and extracts data
-async function scrapeProfile(url, globalProcessedIds = []) {
+async function scrapeProfile(url, globalProcessedIds = [], settings = {}) {
     return new Promise((resolve, reject) => {
         chrome.tabs.create({ url, active: false }, async (tab) => {
             if (chrome.runtime.lastError || !tab) {
@@ -193,7 +193,7 @@ async function scrapeProfile(url, globalProcessedIds = []) {
                     }).then(() => {
                         // Give DOM a bit more time to render tweets
                         setTimeout(() => {
-                            chrome.tabs.sendMessage(tab.id, { action: "start_extraction", globalProcessedIds }, (response) => {
+                            chrome.tabs.sendMessage(tab.id, { action: "start_extraction", globalProcessedIds, settings }, (response) => {
                                 chrome.tabs.remove(tab.id); // Close tab
                                 if (chrome.runtime.lastError) {
                                     return reject(chrome.runtime.lastError);

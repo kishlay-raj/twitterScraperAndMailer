@@ -106,7 +106,7 @@ function extractProfileMeta(pagePathname) {
 }
 
 
-async function extractTweets(globalProcessedIds = []) {
+async function extractTweets(globalProcessedIds = [], settings = {}) {
     const tweetsData = [];
 
     // ⚡ Extract profile metadata FIRST — before any scrolling.
@@ -122,6 +122,16 @@ async function extractTweets(globalProcessedIds = []) {
 
     let attemptsWithNoNewTweets = 0;
     const maxAttempts = 3;
+
+    let durationLimitMs = ONE_DAY_MS;
+    if (settings && settings.scrapeDuration && settings.scrapeDurationUnit) {
+        durationLimitMs = settings.scrapeDurationUnit === 'days'
+            ? settings.scrapeDuration * 24 * 60 * 60 * 1000
+            : settings.scrapeDuration * 60 * 60 * 1000;
+        bgLog(`Custom scrape duration limit: ${settings.scrapeDuration} ${settings.scrapeDurationUnit} (${durationLimitMs} ms)`);
+    } else {
+        bgLog(`Using default scrape duration limit: 24 hours`);
+    }
 
     bgLog(`Antigravity Scraper started... Pre-loaded ${processedTweetIds.size} old tweets to skip.`);
 
@@ -170,9 +180,10 @@ async function extractTweets(globalProcessedIds = []) {
 
             bgLog(`-> Age: ${ageHours} hours old.`);
 
-            // Check if older than 24 hours
-            if (ageMs > ONE_DAY_MS) {
-                bgLog("-> Skipping: Tweet is older than 24 hours.");
+            // Check if older than scrape duration limit
+            if (ageMs > durationLimitMs) {
+                const limitHours = (durationLimitMs / (1000 * 60 * 60)).toFixed(1);
+                bgLog(`-> Skipping: Tweet is older than ${limitHours} hours limit.`);
                 if (tweetId !== 'Unknown ID') processedTweetIds.add(tweetId);
                 continue;
             }
@@ -210,7 +221,7 @@ async function extractTweets(globalProcessedIds = []) {
             let quotedTweet = null;
             // X nests quoted tweets inside [role="blockquote"] or as an inner [data-testid="tweet"]
             const quoteEl = tweetEl.querySelector('[role="blockquote"]') ||
-                            tweetEl.querySelector('[data-testid="tweet"] [data-testid="tweet"]');
+                tweetEl.querySelector('[data-testid="tweet"] [data-testid="tweet"]');
             if (quoteEl) {
                 const qTextEl = quoteEl.querySelector('[data-testid="tweetText"]');
                 const qNameEl = quoteEl.querySelector('[data-testid="User-Name"]');
@@ -249,6 +260,19 @@ async function extractTweets(globalProcessedIds = []) {
             }
 
             const isRetweet = socialContextText.toLowerCase().includes('reposted') || tweetEl.innerHTML.includes('reposted');
+
+            // Skip primary tweets that belong to other users unless it's a retweet by the main profile
+            if (profileMeta.profileHandle && tweetUrl !== 'Unknown URL') {
+                const targetPath = `/${profileMeta.profileHandle.replace('@', '').toLowerCase()}/status/`;
+                const isTargetProfileTweet = tweetUrl.toLowerCase().includes(targetPath);
+
+                if (!isTargetProfileTweet && !isRetweet) {
+                    bgLog(`-> Skipping: Tweet URL (${tweetUrl}) does not match target profile ${profileMeta.profileHandle}. Probably a parent thread tweet.`);
+                    if (tweetId !== 'Unknown ID') processedTweetIds.add(tweetId);
+                    addedNewTweetThisCycle = true; // Prevents the scraper from thinking it stalled
+                    continue;
+                }
+            }
 
             // Detect Subscriber-only posts
             // 1. Check for the specific SVG path X uses for the "Subscriber" icon (person with a star)
@@ -350,7 +374,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (request.action === "start_extraction") {
             // Run extraction and reply
-            extractTweets(request.globalProcessedIds || [])
+            extractTweets(request.globalProcessedIds || [], request.settings || {})
                 .then(result => sendResponse({ success: true, data: result.tweets, profileMeta: result.profileMeta }))
                 .catch(err => sendResponse({ success: false, error: err.message }));
 
