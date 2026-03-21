@@ -357,7 +357,7 @@ addCategoryBtn.addEventListener('click', () => {
   }
 });
 
-// Save Settings & Trigger Scraping
+// Save Settings (no longer triggers scraping)
 saveSettingsBtn.addEventListener('click', () => {
   state.settings.llmApiKey = document.getElementById('llm-api-key').value.trim();
   state.settings.emailApiKey = document.getElementById('email-api-key').value.trim();
@@ -369,13 +369,29 @@ saveSettingsBtn.addEventListener('click', () => {
   state.settings.scrapeDurationUnit = document.getElementById('scrape-duration-unit').value || 'hours';
 
   saveState().then(() => {
-    statusMessage.textContent = 'Settings saved. Initiating scraping...';
+    statusMessage.textContent = '✅ Settings saved!';
     setTimeout(() => { statusMessage.textContent = ''; }, 3000);
 
     // Notify background script to update alarms
     chrome.runtime.sendMessage({ action: "update_schedule", settings: state.settings });
+  });
+});
 
-    // Notify background script to start the scraping sequence
-    chrome.runtime.sendMessage({ action: "start_scraping" });
+// Run Now button (triggers scraping immediately)
+const runNowBtn = document.getElementById('run-now-btn');
+const runStatusMessage = document.getElementById('run-status-message');
+
+runNowBtn.addEventListener('click', () => {
+  runStatusMessage.textContent = '⏳ Scraping in progress...';
+  runNowBtn.disabled = true;
+  runNowBtn.style.opacity = '0.6';
+
+  chrome.runtime.sendMessage({ action: "start_scraping" }, () => {
+    runStatusMessage.textContent = '🚀 Scraping started!';
+    setTimeout(() => {
+      runStatusMessage.textContent = '';
+      runNowBtn.disabled = false;
+      runNowBtn.style.opacity = '1';
+    }, 4000);
   });
 });
