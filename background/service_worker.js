@@ -3,7 +3,7 @@ importScripts('llm_api.js', 'email_api.js');
 // Listener from Popup UI and Content Scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "start_scraping") {
-        startScrapingSequence();
+        scheduleCategoryScrapes();
         sendResponse({ status: 'Sequence started' });
     } else if (request.action === "update_schedule") {
         updateSchedule(request.settings);
@@ -17,7 +17,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === "dailyScrapeAlarm") {
         console.log("Scheduled Scrape Alarm triggered!");
-        startScrapingSequence();
+        scheduleCategoryScrapes();
+    } else if (alarm.name.startsWith("scrapeCategory_")) {
+        const categoryIndex = parseInt(alarm.name.split("_")[1]);
+        console.log(`Category Alarm triggered for index ${categoryIndex}!`);
+        scrapeAndDispatchCategory(categoryIndex);
     }
 });
 
@@ -63,44 +67,79 @@ async function updateSchedule(settings) {
 chrome.runtime.onStartup.addListener(() => updateSchedule());
 chrome.runtime.onInstalled.addListener(() => updateSchedule());
 
-async function startScrapingSequence() {
-    const { categories, processedTweetIds, settings } = await chrome.storage.local.get(['categories', 'processedTweetIds', 'settings']);
-    if (!categories || categories.length === 0) return;
+// ============================================================
+// SCHEDULER: Schedules each category as an independent alarm
+// spaced 10 minutes apart so each gets a fresh execution window.
+// ============================================================
+async function scheduleCategoryScrapes() {
+    const { categories } = await chrome.storage.local.get(['categories']);
+    if (!categories || categories.length === 0) {
+        console.log("No categories to scrape.");
+        return;
+    }
 
-    let globalProcessedIds = processedTweetIds || [];
-    let newIdsDeduplicated = new Set();
-    let allowDuplicates = settings?.allowDuplicates || false;
-
-    let compilationPayload = {}; // Reset payload
-    const profilesToScrape = [];
-
-    // Flatten the category structure to a list of profiles to scrape sequentially
-    for (const category of categories) {
-        // Skip entire category if disabled explicitly
-        if (category.isActive === false) continue;
-
-        if (!compilationPayload[category.name]) {
-            // Store extra emails alongside the profiles array for this category
-            compilationPayload[category.name] = {
-                extraEmails: category.enableExtraEmails !== false ? (category.extraEmails || '') : '',
-                profiles: []
-            };
-        }
-        for (const profile of category.profiles) {
-            // Default to true if isActive is missing for backward compatibility
-            if (profile.isActive !== false) {
-                profilesToScrape.push({
-                    url: profile.url,
-                    category: category.name,
-                    enableAiSummary: profile.enableAiSummary,
-                    scrapeReplies: profile.scrapeReplies
-                });
-            }
+    // Clear any previous category alarms that might be lingering
+    const existingAlarms = await chrome.alarms.getAll();
+    for (const alarm of existingAlarms) {
+        if (alarm.name.startsWith("scrapeCategory_")) {
+            await chrome.alarms.clear(alarm.name);
         }
     }
 
-    // Sequentially scrape each profile
-    for (const profile of profilesToScrape) {
+    const INTERVAL_MINUTES = 10; // 10 minutes between each category
+    let scheduledCount = 0;
+
+    for (let i = 0; i < categories.length; i++) {
+        if (categories[i].isActive === false) {
+            console.log(`Skipping disabled category: ${categories[i].name}`);
+            continue;
+        }
+
+        if (scheduledCount === 0) {
+            // Run the very first active category immediately
+            console.log(`Running Category [${categories[i].name}] immediately (index ${i})`);
+            scrapeAndDispatchCategory(i);
+        } else {
+            // Schedule future categories at 10-minute intervals
+            const delayMs = scheduledCount * INTERVAL_MINUTES * 60 * 1000;
+            console.log(`Scheduling Category [${categories[i].name}] (index ${i}) in ${scheduledCount * INTERVAL_MINUTES} minutes`);
+            chrome.alarms.create(`scrapeCategory_${i}`, {
+                when: Date.now() + delayMs
+            });
+        }
+        scheduledCount++;
+    }
+
+    console.log(`Scheduled ${scheduledCount} categories total.`);
+}
+
+// ============================================================
+// WORKER: Scrapes all profiles in ONE category and dispatches
+// the email. This is a completely self-contained unit of work.
+// ============================================================
+async function scrapeAndDispatchCategory(categoryIndex) {
+    const { categories, processedTweetIds, settings } = await chrome.storage.local.get(['categories', 'processedTweetIds', 'settings']);
+    if (!categories || categoryIndex >= categories.length) return;
+
+    const category = categories[categoryIndex];
+    if (category.isActive === false) return;
+
+    let globalProcessedIds = processedTweetIds || [];
+    let allowDuplicates = settings?.allowDuplicates || false;
+    let newIdsThisCategory = new Set();
+
+    console.log(`=== BEGIN scrapeAndDispatchCategory: [${category.name}] (index ${categoryIndex}) ===`);
+
+    let compilationPayload = {
+        [category.name]: {
+            extraEmails: category.enableExtraEmails !== false ? (category.extraEmails || '') : '',
+            profiles: []
+        }
+    };
+
+    for (const profile of (category.profiles || [])) {
+        if (profile.isActive === false) continue;
+
         try {
             let targetUrl = profile.url;
             if (profile.scrapeReplies) {
@@ -109,17 +148,15 @@ async function startScrapingSequence() {
                     parsedUrl.pathname = parsedUrl.pathname.replace(/\/+$/, '') + '/with_replies';
                     targetUrl = parsedUrl.toString();
                 } catch (e) {
-                    targetUrl = targetUrl.replace(/\/+$/, '') + '/with_replies'; // Fallback
+                    targetUrl = targetUrl.replace(/\/+$/, '') + '/with_replies';
                 }
             }
 
-            // Bypass pre-loading skip IDs into the content script if duplicates are allowed
             const globalProcessedIdsToPass = allowDuplicates ? [] : globalProcessedIds;
             const scrapeResult = await scrapeProfile(targetUrl, globalProcessedIdsToPass, settings);
             const rawTweets = scrapeResult.tweets || [];
             const profileMeta = scrapeResult.profileMeta || {};
 
-            // Filter out tweets that were previously sent (if duplicates not allowed), but always record new IDs
             let novelTweets = [];
             if (rawTweets.length > 0) {
                 for (const t of rawTweets) {
@@ -127,17 +164,16 @@ async function startScrapingSequence() {
                         novelTweets.push(t);
                     }
                     if (!globalProcessedIds.includes(t.id)) {
-                        newIdsDeduplicated.add(t.id);
+                        newIdsThisCategory.add(t.id);
                     }
                 }
             }
 
-            // Exclude retweets here if the user's settings explicitly disabled them for this profile
             if (profile.scrapeRetweets === false) {
                 novelTweets = novelTweets.filter(t => !t.isRetweet);
             }
 
-            compilationPayload[profile.category].profiles.push({
+            compilationPayload[category.name].profiles.push({
                 url: profile.url,
                 profileMeta,
                 enableAiSummary: profile.enableAiSummary,
@@ -146,10 +182,10 @@ async function startScrapingSequence() {
             });
 
             // Brief delay between profile visits
-            await new Promise(r => setTimeout(r, 2000));
+            await new Promise(r => setTimeout(r, 500));
         } catch (err) {
-            console.error(`Failed to scrape ${profile.url}:`, err);
-            compilationPayload[profile.category].profiles.push({
+            console.error(`Failed to scrape ${profile.url} in ${category.name}:`, err);
+            compilationPayload[category.name].profiles.push({
                 url: profile.url,
                 profileMeta: {},
                 enableAiSummary: profile.enableAiSummary,
@@ -159,33 +195,78 @@ async function startScrapingSequence() {
         }
     }
 
-    // Once scraping is complete, trigger the processing pipeline
-    await processAndDispatch(compilationPayload);
-
-    // Save the new novel IDs back to storage (cap at 5000 latest to prevent memory leaks)
-    if (newIdsDeduplicated.size > 0) {
-        let combinedIds = [...globalProcessedIds, ...newIdsDeduplicated];
-        if (combinedIds.length > 5000) {
-            // Keep only the 5000 most recent ones
-            combinedIds = combinedIds.slice(combinedIds.length - 5000);
-        }
-        await chrome.storage.local.set({ processedTweetIds: combinedIds });
-        console.log(`Saved ${newIdsDeduplicated.size} new novel tweet IDs to persistent storage.`);
+    // Dispatch email for this category
+    console.log(`Finished scraping [${category.name}]. Dispatching email...`);
+    try {
+        await processAndDispatch(compilationPayload);
+    } catch (dispatchErr) {
+        console.error(`CRITICAL: processAndDispatch failed for ${category.name}:`, dispatchErr);
     }
+
+    // Save new IDs
+    if (newIdsThisCategory.size > 0) {
+        // Re-read to avoid overwriting IDs saved by a concurrently running category
+        const { processedTweetIds: latestIds } = await chrome.storage.local.get(['processedTweetIds']);
+        let combinedIds = [...(latestIds || []), ...newIdsThisCategory];
+        if (combinedIds.length > 5000) combinedIds = combinedIds.slice(combinedIds.length - 5000);
+        await chrome.storage.local.set({ processedTweetIds: combinedIds });
+        console.log(`Saved ${newIdsThisCategory.size} new tweet IDs for [${category.name}].`);
+    }
+
+    console.log(`=== END scrapeAndDispatchCategory: [${category.name}] ===`);
 }
 
-// Opens a tab, injects scripts, and extracts data
-async function scrapeProfile(url, globalProcessedIds = [], settings = {}) {
+// Opens a tab, injects scripts, and extracts data.
+// Includes error-page detection (e.g. network failures, X rate-limits)
+// and a single retry with back-off.
+async function scrapeProfile(url, globalProcessedIds = [], settings = {}, _retryCount = 0) {
+    const MAX_RETRIES = 1;
+    const RETRY_DELAY_MS = 5000;
+    const TAB_TIMEOUT_MS = 60000; // 60-second safety timeout
+
     return new Promise((resolve, reject) => {
         chrome.tabs.create({ url, active: false }, async (tab) => {
             if (chrome.runtime.lastError || !tab) {
                 return reject(new Error(chrome.runtime.lastError?.message || "Tab not created"));
             }
 
+            let settled = false;
+            const settle = (fn, val) => { if (!settled) { settled = true; fn(val); } };
+
+            // Safety timeout — if the tab never completes, clean up and fail
+            const safetyTimer = setTimeout(() => {
+                chrome.tabs.onUpdated.removeListener(listener);
+                try { chrome.tabs.remove(tab.id); } catch (_) {}
+                settle(reject, new Error(`Tab timed out after ${TAB_TIMEOUT_MS / 1000}s for ${url}`));
+            }, TAB_TIMEOUT_MS);
+
             // Wait for tab to complete loading to inject scripts
-            chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
-                if (tabId === tab.id && info.status === 'complete') {
-                    chrome.tabs.onUpdated.removeListener(listener);
+            function listener(tabId, info) {
+                if (tabId !== tab.id || info.status !== 'complete') return;
+                chrome.tabs.onUpdated.removeListener(listener);
+                clearTimeout(safetyTimer);
+
+                // Check if Chrome loaded an error page instead of the real site
+                chrome.tabs.get(tab.id, (updatedTab) => {
+                    const tabUrl = updatedTab?.url || '';
+                    const isErrorPage = tabUrl.startsWith('chrome-error://') || tabUrl === 'about:blank';
+
+                    if (isErrorPage) {
+                        console.warn(`Tab for ${url} landed on error page (${tabUrl}).`);
+                        try { chrome.tabs.remove(tab.id); } catch (_) {}
+
+                        if (_retryCount < MAX_RETRIES) {
+                            console.log(`Retrying ${url} in ${RETRY_DELAY_MS / 1000}s (attempt ${_retryCount + 1})...`);
+                            setTimeout(() => {
+                                scrapeProfile(url, globalProcessedIds, settings, _retryCount + 1)
+                                    .then(resolve)
+                                    .catch(reject);
+                            }, RETRY_DELAY_MS);
+                        } else {
+                            settle(reject, new Error(`Page failed to load after ${MAX_RETRIES + 1} attempts (error page)`));
+                        }
+                        return;
+                    }
 
                     chrome.scripting.executeScript({
                         target: { tabId: tab.id },
@@ -199,22 +280,24 @@ async function scrapeProfile(url, globalProcessedIds = [], settings = {}) {
                                 chrome.tabs.sendMessage(tab.id, { action: "start_extraction", globalProcessedIds, settings }, (response) => {
                                     chrome.tabs.remove(tab.id); // Close tab
                                     if (chrome.runtime.lastError) {
-                                        return reject(chrome.runtime.lastError);
+                                        return settle(reject, chrome.runtime.lastError);
                                     }
                                     if (response && response.success) {
-                                        resolve({ tweets: response.data, profileMeta: response.profileMeta || {} });
+                                        settle(resolve, { tweets: response.data, profileMeta: response.profileMeta || {} });
                                     } else {
-                                        reject(new Error(response?.error || 'Unknown error'));
+                                        settle(reject, new Error(response?.error || 'Unknown error'));
                                     }
                                 });
-                            }, 3000);
+                            }, 1500);
                         });
                     }).catch(err => {
                         chrome.tabs.remove(tab.id);
-                        reject(err);
+                        settle(reject, err);
                     });
-                }
-            });
+                });
+            }
+
+            chrome.tabs.onUpdated.addListener(listener);
         });
     });
 }

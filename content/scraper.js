@@ -203,7 +203,7 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
                 } else {
                     bgLog("-> Expanding 'Show more' text...");
                     expandBtn.click();
-                    await randomDelay(800, 1500); // wait for load
+                    await randomDelay(400, 800); // wait for load
                 }
             }
 

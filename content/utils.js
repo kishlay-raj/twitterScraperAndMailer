@@ -20,7 +20,7 @@ async function humanScroll() {
         behavior: 'smooth'
     });
 
-    await randomDelay(1500, 3500);
+    await randomDelay(800, 1500);
 }
 
 // Export for Node.js Testing
