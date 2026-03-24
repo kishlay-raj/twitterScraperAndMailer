@@ -24,3 +24,4 @@ Thumbs.db
 # Any sensitive info
 config.json
 *.log
+coverage/
