@@ -138,4 +138,92 @@ describe('X Profile Scraper', () => {
         expect(profileMeta.profileName).toBe('Minakshi Shriyan');
         expect(profileMeta.profileAvatarUrl).toBe('https://pbs.twimg.com/profile_images/123/photo.jpg');
     });
+
+    test('should extract media URLs (main and quoted)', async () => {
+        document.body.innerHTML = `
+            <div data-testid="tweet">
+                <a href="https://x.com/user/status/media123">Time</a>
+                <time datetime="2026-03-08T11:00:00Z"></time>
+                
+                <div data-testid="User-Name"><span>Main User</span><span>@main</span></div>
+                <div data-testid="tweetText">Main text</div>
+                <div data-testid="tweetPhoto">
+                    <img src="https://pbs.twimg.com/media/main.jpg" />
+                </div>
+
+                <!-- Quote Tweet sub-structure -->
+                <div data-testid="User-Name"><span>Quoted User</span><span>@quoted</span></div>
+                <div data-testid="tweetText">Quoted text</div>
+                <div data-testid="tweetPhoto">
+                    <img src="https://pbs.twimg.com/media/quoted.jpg" />
+                </div>
+            </div>
+        `;
+
+        const { tweets } = await extractTweets();
+        
+        expect(tweets[0].mediaUrls).toContain('https://pbs.twimg.com/media/main.jpg');
+        expect(tweets[0].quotedTweet.mediaUrls).toContain('https://pbs.twimg.com/media/quoted.jpg');
+        expect(tweets[0].quotedTweet.text).toBe('Quoted text');
+    });
+
+    test('should detect Subscriber-only status from SVG path', async () => {
+        document.body.innerHTML = `
+            <div data-testid="tweet">
+                <a href="https://x.com/user/status/sub123">Time</a>
+                <time datetime="2026-03-08T11:00:00Z"></time>
+                <svg><path d="M12 1.75l2.69 5.454 6.02.875"></path></svg>
+            </div>
+        `;
+
+        const { tweets } = await extractTweets();
+        expect(tweets[0].isSubscriberOnly).toBe(true);
+    });
+
+    test('should extract structural Reply Context from previous sibling', async () => {
+        document.body.innerHTML = `
+            <div data-testid="cellInnerDiv">
+                <div data-testid="tweet">
+                    <div data-testid="User-Name"><span>Parent User</span><span>@parent</span></div>
+                    <div data-testid="tweetText">Original parent tweet</div>
+                </div>
+            </div>
+            <div data-testid="cellInnerDiv">
+                <div data-testid="tweet">
+                    <a href="https://x.com/target/status/reply456">Time</a>
+                    <time datetime="2026-03-08T11:30:00Z"></time>
+                    <div data-testid="tweetText">Replying to @parent</div>
+                </div>
+            </div>
+        `;
+
+        // Mock profileMeta.profileHandle to match 'target' so it's not skipped
+        const { tweets } = await extractTweets([], { profileHandle: '@target' });
+        
+        expect(tweets).toHaveLength(1);
+        expect(tweets[0].replyContext).not.toBeNull();
+        expect(tweets[0].replyContext.authorHandle).toBe('@parent');
+        expect(tweets[0].replyContext.text).toBe('Original parent tweet');
+    });
+
+    test('should respect custom duration limit in settings', async () => {
+        // Mock current time: 2026-03-08T12:00:00Z
+        document.body.innerHTML = `
+            <div data-testid="tweet">
+                <a href="https://x.com/user/status/too_old">Time</a>
+                <time datetime="2026-03-08T06:00:00Z"></time> <!-- 6 hours old -->
+            </div>
+            <div data-testid="tweet">
+                <a href="https://x.com/user/status/just_right">Time</a>
+                <time datetime="2026-03-08T11:00:00Z"></time> <!-- 1 hour old -->
+            </div>
+        `;
+
+        // Limit to 2 hours
+        const settings = { scrapeDuration: 2, scrapeDurationUnit: 'hours' };
+        const { tweets } = await extractTweets([], settings);
+        
+        expect(tweets).toHaveLength(1);
+        expect(tweets[0].id).toBe('just_right');
+    });
 });
