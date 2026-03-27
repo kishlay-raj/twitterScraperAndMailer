@@ -133,7 +133,7 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
         bgLog(`Using default scrape duration limit: 24 hours`);
     }
 
-    log("DailyUpdates Scraper started... Pre-loaded " + globalProcessedIds.length + " old tweets to skip.");
+    bgLog(`DailyUpdates Scraper started... Pre-loaded ${globalProcessedIds.length} old tweets to skip.`);
 
     while (attemptsWithNoNewTweets < maxAttempts) {
         // 1. Find all tweet elements on the screen
