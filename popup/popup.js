@@ -24,15 +24,40 @@ const importBtn = document.getElementById('import-btn');
 const importFile = document.getElementById('import-file');
 const logsContainer = document.getElementById('logs-container');
 const clearLogsBtn = document.getElementById('clear-logs-btn');
+const blockTwitterBtn = document.getElementById('block-twitter-btn');
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
   await loadState();
   renderState();
   renderLogs();
+  updateBlockButtonUI();
 
   // Refresh logs periodically while popup is open
   setInterval(renderLogs, 5000);
+});
+
+async function updateBlockButtonUI() {
+  chrome.runtime.sendMessage({ action: "get_block_status" }, (response) => {
+    if (response) {
+      if (response.isBlocked) {
+        blockTwitterBtn.textContent = '✅ Unblock X (Twitter)';
+        blockTwitterBtn.classList.add('active');
+      } else {
+        blockTwitterBtn.textContent = '🚫 Block X (Twitter)';
+        blockTwitterBtn.classList.remove('active');
+      }
+    }
+  });
+}
+
+blockTwitterBtn.addEventListener('click', () => {
+  const isCurrentlyBlocked = blockTwitterBtn.classList.contains('active');
+  const shouldBlock = !isCurrentlyBlocked;
+  
+  chrome.runtime.sendMessage({ action: "toggle_block", block: shouldBlock }, (response) => {
+    if (response) updateBlockButtonUI();
+  });
 });
 
 async function renderLogs() {
@@ -333,7 +358,7 @@ exportBtn.addEventListener('click', () => {
   const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state.categories, null, 2));
   const downloadAnchorNode = document.createElement('a');
   downloadAnchorNode.setAttribute("href", dataStr);
-  downloadAnchorNode.setAttribute("download", "antigravity_profiles.json");
+  downloadAnchorNode.setAttribute("download", "dailyupdates_profiles.json");
   document.body.appendChild(downloadAnchorNode);
   downloadAnchorNode.click();
   downloadAnchorNode.remove();

@@ -248,6 +248,35 @@ button:hover {
   min-height: 1.2em;
 }
 
+.block-btn {
+  padding: 6px 12px;
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-block;
+  width: auto;
+}
+
+.block-btn.active {
+  background: #fef2f2;
+  color: #ef4444;
+  border-color: #fecaca;
+}
+
+.block-btn:hover {
+  background: #e2e8f0;
+  transform: none;
+}
+
+.block-btn.active:hover {
+  background: #fee2e2;
+}
+
 .logs-section {
   padding: 10px;
 }

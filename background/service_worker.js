@@ -10,8 +10,82 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ status: 'Schedule updated' });
     } else if (request.action === "log") {
         addLog(request.message, request.level || "info");
+    } else if (request.action === "toggle_block") {
+        updateTwitterBlock(request.block).then(() => {
+            sendResponse({ status: 'updated', isBlocked: request.block });
+        });
+        return true; // async
+    } else if (request.action === "get_block_status") {
+        chrome.storage.local.get(['twitterBlocked'], (res) => {
+            sendResponse({ isBlocked: !!res.twitterBlocked });
+        });
+        return true; // async
     }
 });
+
+/**
+ * Updates declarativeNetRequest rules to block or unblock X/Twitter
+ */
+async function updateTwitterBlock(shouldBlock, isTemporaryUnblock = false) {
+    const RULE_ID_X = 101;
+    const RULE_ID_TWITTER = 102;
+
+    if (shouldBlock) {
+        await chrome.declarativeNetRequest.updateDynamicRules({
+            removeRuleIds: [RULE_ID_X, RULE_ID_TWITTER],
+            addRules: [
+                {
+                    id: RULE_ID_X,
+                    priority: 1,
+                    action: { type: "block" },
+                    condition: { urlFilter: "||x.com", resourceTypes: ["main_frame", "sub_frame"] }
+                },
+                {
+                    id: RULE_ID_TWITTER,
+                    priority: 1,
+                    action: { type: "block" },
+                    condition: { urlFilter: "||twitter.com", resourceTypes: ["main_frame", "sub_frame"] }
+                }
+            ]
+        });
+        addLog("Twitter blocking ACTIVATED.");
+        await chrome.storage.local.set({ twitterBlocked: true, twitterWasBlockedTemporarily: false });
+
+        // Inject a block overlay to any tabs currently open on Twitter/X to ensure the block is immediately effective
+        chrome.tabs.query({ url: ["*://*.x.com/*", "*://*.twitter.com/*", "*://x.com/*", "*://twitter.com/*"] }, (tabs) => {
+            if (tabs && tabs.length > 0) {
+                for (let tab of tabs) {
+                    try {
+                        chrome.scripting.executeScript({
+                            target: { tabId: tab.id, allFrames: true },
+                            func: () => {
+                                document.body.innerHTML = \`
+                                    <div style="display:flex; height:100vh; width:100vw; background:#f9fafb; align-items:center; justify-content:center; flex-direction:column; font-family:sans-serif; position:fixed; top:0; left:0; z-index:999999999;">
+                                        <h1 style="color:#ef4444; font-size:32px; margin-bottom:10px; font-weight:bold;">🚫 X (Twitter) is Blocked</h1>
+                                        <p style="color:#64748b; font-size:16px;">This page has been restricted by DailyUpdates Curation.</p>
+                                    </div>
+                                \`;
+                                document.body.style.margin = "0";
+                                document.body.style.overflow = "hidden";
+                            }
+                        });
+                    } catch (e) {}
+                }
+                addLog(\`Injected block screen into \${tabs.length} existing Twitter tab(s).\`);
+            }
+        });
+
+    } else {
+        await chrome.declarativeNetRequest.updateDynamicRules({
+            removeRuleIds: [RULE_ID_X, RULE_ID_TWITTER]
+        });
+        addLog(isTemporaryUnblock ? "Twitter blocking TEMPORARILY DEACTIVATED for scraping." : "Twitter blocking DEACTIVATED.");
+        await chrome.storage.local.set({ 
+            twitterBlocked: false, 
+            twitterWasBlockedTemporarily: isTemporaryUnblock 
+        });
+    }
+}
 
 /**
  * Adds a log entry to storage and prunes logs older than 2 days
@@ -113,6 +187,13 @@ async function scheduleCategoryScrapes() {
 
     const INTERVAL_MINUTES = 10; // 10 minutes between each category
     let scheduledCount = 0;
+
+    // Check if we need to temporarily unblock
+    const { twitterBlocked } = await chrome.storage.local.get(['twitterBlocked']);
+    if (twitterBlocked) {
+        addLog("Twitter is blocked. Temporarily unblocking for scheduled scrape session.");
+        await updateTwitterBlock(false, true); // false = unblock, true = temporary flag
+    }
 
     for (let i = 0; i < categories.length; i++) {
         if (categories[i].isActive === false) {
@@ -239,6 +320,18 @@ async function scrapeAndDispatchCategory(categoryIndex) {
     }
 
     console.log(`=== END scrapeAndDispatchCategory: [${category.name}] ===`);
+
+    // Check if this was the last category scheduled
+    const allAlarms = await chrome.alarms.getAll();
+    const activeCategoryAlarms = allAlarms.filter(a => a.name.startsWith("scrapeCategory_"));
+    
+    if (activeCategoryAlarms.length === 0) {
+        const { twitterWasBlockedTemporarily } = await chrome.storage.local.get(['twitterWasBlockedTemporarily']);
+        if (twitterWasBlockedTemporarily) {
+            addLog("All categories finished. Re-blocking Twitter as per user setting.");
+            await updateTwitterBlock(true); // Re-block
+        }
+    }
 }
 
 // Opens a tab, injects scripts, and extracts data.
@@ -249,7 +342,15 @@ async function scrapeProfile(url, globalProcessedIds = [], settings = {}, _retry
     const RETRY_DELAY_MS = 5000;
     const TAB_TIMEOUT_MS = 60000; // 60-second safety timeout
 
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
+        // Enforce unblocking right before creating the tab, in case the user 
+        // manually re-blocked Twitter in the popup during an active multi-profile scrape.
+        const { twitterBlocked } = await chrome.storage.local.get(['twitterBlocked']);
+        if (twitterBlocked) {
+            addLog("Twitter was found blocked mid-scrape. Force unblocking temporarily to proceed.");
+            await updateTwitterBlock(false, true);
+        }
+
         chrome.tabs.create({ url, active: false }, async (tab) => {
             if (chrome.runtime.lastError || !tab) {
                 return reject(new Error(chrome.runtime.lastError?.message || "Tab not created"));
@@ -370,7 +471,7 @@ async function processAndDispatch(payload) {
             <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);
                         padding:28px 28px 20px 28px; text-align:center;">
               <div style="font-size:22px; font-weight:700; color:#ffffff;
-                          letter-spacing:-0.3px;">🛰️ Antigravity Curation</div>
+                          letter-spacing:-0.3px;">🛰️ DailyUpdates Curation</div>
               <div style="font-size:13px; color:#c7d2fe; margin-top:4px;">${categoryName}</div>
             </td>
           </tr>
@@ -604,7 +705,7 @@ async function processAndDispatch(payload) {
             <td style="background:#f8f7ff; border-top:1px solid #e0e7ff;
                         padding:16px 28px; text-align:center;">
               <div style="font-size:12px; color:#9ca3af;">
-                Sent by <strong style="color:#6366f1;">Antigravity Extension</strong>
+                Sent by <strong style="color:#6366f1;">DailyUpdates Extension</strong>
                 &nbsp;·&nbsp;
                 <span>${new Date().toLocaleDateString([], { dateStyle: 'medium' })}</span>
               </div>

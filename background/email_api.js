@@ -10,7 +10,7 @@ async function sendEmailPayload(htmlContent, recipientEmail, webhookUrl, customS
 
     try {
         const timeString = new Date().toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
-        const emailSubject = customSubject ? `${customSubject} - ${timeString}` : `Your Antigravity Curation - ${timeString}`;
+        const emailSubject = customSubject ? `${customSubject} - ${timeString}` : `Your DailyUpdates Curation - ${timeString}`;
 
         const payload = {
             recipient: recipientEmail,

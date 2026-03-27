@@ -1,13 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "Antigravity - X Scraper & Mailer",
+  "name": "DailyUpdates - X Scraper & Mailer",
   "version": "1.0",
   "description": "Automated X (Twitter) scraping, AI summarization, and email dispatch.",
   "permissions": [
     "storage",
     "scripting",
     "alarms",
-    "identity"
+    "identity",
+    "declarativeNetRequest",
+    "declarativeNetRequestFeedback"
   ],
   "host_permissions": [
     "https://x.com/*",

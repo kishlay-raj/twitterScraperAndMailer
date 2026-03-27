@@ -50,7 +50,7 @@ describe('Email API', () => {
         const requestBody = JSON.parse(global.fetch.mock.calls[0][1].body);
         expect(requestBody.recipient).toBe(email);
         expect(requestBody.html).toBe(html);
-        expect(requestBody.subject).toContain('Your Antigravity Curation');
+        expect(requestBody.subject).toContain('Your DailyUpdates Curation');
 
         expect(console.log).toHaveBeenCalledWith('Email dispatched successfully via Apps Script Webhook!');
     });
