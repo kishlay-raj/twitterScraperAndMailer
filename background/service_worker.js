@@ -59,19 +59,19 @@ async function updateTwitterBlock(shouldBlock, isTemporaryUnblock = false) {
                         chrome.scripting.executeScript({
                             target: { tabId: tab.id, allFrames: true },
                             func: () => {
-                                document.body.innerHTML = \`
+                                document.body.innerHTML = `
                                     <div style="display:flex; height:100vh; width:100vw; background:#f9fafb; align-items:center; justify-content:center; flex-direction:column; font-family:sans-serif; position:fixed; top:0; left:0; z-index:999999999;">
                                         <h1 style="color:#ef4444; font-size:32px; margin-bottom:10px; font-weight:bold;">🚫 X (Twitter) is Blocked</h1>
                                         <p style="color:#64748b; font-size:16px;">This page has been restricted by DailyUpdates Curation.</p>
                                     </div>
-                                \`;
+                                `;
                                 document.body.style.margin = "0";
                                 document.body.style.overflow = "hidden";
                             }
                         });
                     } catch (e) {}
                 }
-                addLog(\`Injected block screen into \${tabs.length} existing Twitter tab(s).\`);
+                addLog(`Injected block screen into ${tabs.length} existing Twitter tab(s).`);
             }
         });
 
