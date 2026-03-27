@@ -247,3 +247,43 @@ button:hover {
   margin-bottom: 12px;
   min-height: 1.2em;
 }
+
+.logs-section {
+  padding: 10px;
+}
+
+.logs-container {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.7rem;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 8px;
+  border-radius: 6px;
+  max-height: 150px;
+  overflow-y: auto;
+  line-height: 1.4;
+}
+
+.log-entry {
+  margin-bottom: 4px;
+  word-break: break-all;
+  border-bottom: 1px solid #1e293b;
+  padding-bottom: 2px;
+}
+
+.log-entry:last-child {
+  border-bottom: none;
+}
+
+.log-timestamp {
+  color: #94a3b8;
+  margin-right: 6px;
+}
+
+.log-level-info {
+  color: #38bdf8;
+}
+
+.log-level-error {
+  color: #f87171;
+}

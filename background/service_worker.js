@@ -9,9 +9,34 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         updateSchedule(request.settings);
         sendResponse({ status: 'Schedule updated' });
     } else if (request.action === "log") {
-        console.log(request.message);
+        addLog(request.message, request.level || "info");
     }
 });
+
+/**
+ * Adds a log entry to storage and prunes logs older than 2 days
+ */
+async function addLog(message, level = "info") {
+    const { logs = [] } = await chrome.storage.local.get(['logs']);
+    const now = Date.now();
+    const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
+
+    // Prune old logs
+    const filteredLogs = logs.filter(log => (now - log.timestamp) < twoDaysMs);
+
+    // Add new log
+    filteredLogs.push({
+        timestamp: now,
+        message,
+        level
+    });
+
+    // Keep only last 100 logs to prevent storage bloat
+    const limitedLogs = filteredLogs.slice(-100);
+
+    await chrome.storage.local.set({ logs: limitedLogs });
+    console.log(`[${level.toUpperCase()}] ${message}`);
+}
 
 // Alarm Listener
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -590,21 +615,22 @@ async function processAndDispatch(payload) {
         </div>
         `;
 
-        console.log(`Compilation complete for ${categoryName}. Dispatching email...`);
+        addLog(`Compilation complete for ${categoryName}. Dispatching email...`);
         const emailSubject = `Curation: ${categoryName}`;
 
-        // 1. Send to global recipient
-        await sendEmailPayload(categoryHtml, recipientEmail, webhookUrl, emailSubject);
-
-        // 2. Send to category-specific extra recipients (if any)
+        let allRecipients = recipientEmail;
         if (extraEmails) {
-            const extraList = extraEmails.split(',').map(e => e.trim()).filter(Boolean);
-            for (const extraEmail of extraList) {
-                await new Promise(r => setTimeout(r, 1000)); // brief gap between sends
-                console.log(`Sending category email also to extra recipient: ${extraEmail}`);
-                await sendEmailPayload(categoryHtml, extraEmail, webhookUrl, emailSubject);
+            // Clean up the comma separated list
+            const extraList = extraEmails.split(',').map(e => e.trim()).filter(Boolean).join(',');
+            if (extraList && extraList.length > 0) {
+                allRecipients = `${recipientEmail},${extraList}`;
+                addLog(`Category [${categoryName}] has extra recipients: ${extraList}. Adding to 'To' field.`);
             }
         }
+
+        // 1. Send to all recipients in the "To" field
+        addLog(`Dispatching category email for [${categoryName}] to: ${allRecipients}`);
+        await sendEmailPayload(categoryHtml, allRecipients, webhookUrl, emailSubject, null);
 
         // Wait 1.5s between categories to avoid concurrent webhook limits
         await new Promise(r => setTimeout(r, 1500));

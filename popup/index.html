@@ -77,6 +77,17 @@
       <button id="save-settings-btn" class="primary-btn">💾 Save Settings</button>
       <div id="status-message"></div>
     </section>
+
+    <section class="section logs-section">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <h2 style="margin: 0;">Recent Logs</h2>
+        <button id="clear-logs-btn" class="utility-btn">Clear</button>
+      </div>
+      <div id="logs-container" class="logs-container">
+        <!-- Logs will be injected here -->
+        <div class="log-entry">No logs yet.</div>
+      </div>
+    </section>
   </div>
   <script src="popup.js"></script>
 </body>

@@ -22,11 +22,39 @@ const statusMessage = document.getElementById('status-message');
 const exportBtn = document.getElementById('export-btn');
 const importBtn = document.getElementById('import-btn');
 const importFile = document.getElementById('import-file');
+const logsContainer = document.getElementById('logs-container');
+const clearLogsBtn = document.getElementById('clear-logs-btn');
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
   await loadState();
   renderState();
+  renderLogs();
+
+  // Refresh logs periodically while popup is open
+  setInterval(renderLogs, 5000);
+});
+
+async function renderLogs() {
+  const { logs = [] } = await chrome.storage.local.get(['logs']);
+  
+  if (logs.length === 0) {
+    logsContainer.innerHTML = '<div class="log-entry">No logs yet.</div>';
+    return;
+  }
+
+  logsContainer.innerHTML = logs.reverse().map(log => {
+    const time = new Date(log.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    return `<div class="log-entry">
+      <span class="log-timestamp">[${time}]</span>
+      <span class="log-level-${log.level}">${log.message}</span>
+    </div>`;
+  }).join('');
+}
+
+clearLogsBtn.addEventListener('click', async () => {
+  await chrome.storage.local.set({ logs: [] });
+  renderLogs();
 });
 
 // Load state from chrome.storage

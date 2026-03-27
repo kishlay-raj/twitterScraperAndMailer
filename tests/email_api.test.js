@@ -55,6 +55,24 @@ describe('Email API', () => {
         expect(console.log).toHaveBeenCalledWith('Email dispatched successfully via Apps Script Webhook!');
     });
 
+    test('should include cc in payload if provided', async () => {
+        global.fetch.mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({ status: 'success' })
+        });
+
+        const html = '<p>Hello</p>';
+        const email = 'test@example.com';
+        const url = 'http://webhook.test';
+        const cc = 'cc1@test.com, cc2@test.com';
+
+        await sendEmailPayload(html, email, url, 'Test Subject', cc);
+
+        const requestBody = JSON.parse(global.fetch.mock.calls[0][1].body);
+        expect(requestBody.recipient).toBe(email);
+        expect(requestBody.cc).toBe(cc);
+    });
+
     test('should handle network errors gracefully', async () => {
         global.fetch.mockRejectedValueOnce(new Error('Network failure'));
 
