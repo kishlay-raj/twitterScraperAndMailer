@@ -157,6 +157,7 @@ function renderState() {
           <span>${category.name}</span>
         </div>
         <div style="display: flex; gap: 10px; align-items: center;">
+          <button class="btn-run-cat" data-id="${category.id}" title="Run this category now">▶ Run</button>
           <label class="toggle-group" style="color: #10b981; font-weight: bold; cursor: pointer;">
             <input type="checkbox" class="cat-active-toggle" data-cat-id="${category.id}" ${category.isActive !== false ? 'checked' : ''}>
             Active
@@ -198,8 +199,8 @@ function attachEventListeners() {
   // Toggle Category Collapse
   document.querySelectorAll('.category-header').forEach(header => {
     header.addEventListener('click', (e) => {
-      // Don't toggle if clicking the delete button or active toggle
-      if (e.target.classList.contains('btn-delete-cat') || e.target.closest('.cat-active-toggle')) return;
+      // Don't toggle if clicking the delete button, run button, or active toggle
+      if (e.target.classList.contains('btn-delete-cat') || e.target.classList.contains('btn-run-cat') || e.target.closest('.cat-active-toggle')) return;
 
       const card = e.target.closest('.category-card');
       const isNowCollapsed = card.classList.toggle('collapsed');
@@ -218,6 +219,27 @@ function attachEventListeners() {
         category.isExpanded = !isNowCollapsed;
         saveState(); // Save silently without a full re-render
       }
+    });
+  });
+
+  // Run Category manually
+  document.querySelectorAll('.btn-run-cat').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation(); // Don't trigger collapse
+      const catId = e.target.getAttribute('data-id');
+      const categoryIndex = state.categories.findIndex(c => c.id === catId);
+      
+      const originalText = e.target.innerHTML;
+      e.target.innerHTML = '⏳...';
+      e.target.disabled = true;
+
+      chrome.runtime.sendMessage({ action: "start_category_scraping", categoryIndex: categoryIndex }, () => {
+        e.target.innerHTML = '✅ Started';
+        setTimeout(() => {
+          e.target.innerHTML = originalText;
+          e.target.disabled = false;
+        }, 2000);
+      });
     });
   });
 

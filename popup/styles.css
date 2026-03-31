@@ -101,6 +101,29 @@ button:hover {
   background-color: #4f46e5;
 }
 
+.btn-run-cat {
+  background: #10b981;
+  color: white;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: background 0.2s;
+}
+
+.btn-run-cat:hover {
+  background: #059669;
+}
+.btn-run-cat:disabled {
+  background: #a7f3d0;
+  cursor: not-allowed;
+}
+
 .category-card {
   border: 1px solid var(--border-color);
   border-radius: 6px;

@@ -5,6 +5,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "start_scraping") {
         scheduleCategoryScrapes();
         sendResponse({ status: 'Sequence started' });
+    } else if (request.action === "start_category_scraping") {
+        startSingleCategoryScrape(request.categoryIndex);
+        sendResponse({ status: 'Category sequence started' });
     } else if (request.action === "update_schedule") {
         updateSchedule(request.settings);
         sendResponse({ status: 'Schedule updated' });
@@ -69,7 +72,7 @@ async function updateTwitterBlock(shouldBlock, isTemporaryUnblock = false) {
                                 document.body.style.overflow = "hidden";
                             }
                         });
-                    } catch (e) {}
+                    } catch (e) { }
                 }
                 addLog(`Injected block screen into ${tabs.length} existing Twitter tab(s).`);
             }
@@ -80,9 +83,9 @@ async function updateTwitterBlock(shouldBlock, isTemporaryUnblock = false) {
             removeRuleIds: [RULE_ID_X, RULE_ID_TWITTER]
         });
         addLog(isTemporaryUnblock ? "Twitter blocking TEMPORARILY DEACTIVATED for scraping." : "Twitter blocking DEACTIVATED.");
-        await chrome.storage.local.set({ 
-            twitterBlocked: false, 
-            twitterWasBlockedTemporarily: isTemporaryUnblock 
+        await chrome.storage.local.set({
+            twitterBlocked: false,
+            twitterWasBlockedTemporarily: isTemporaryUnblock
         });
     }
 }
@@ -202,6 +205,10 @@ async function scheduleCategoryScrapes() {
     if (twitterBlocked) {
         addLog("Twitter is blocked. Temporarily unblocking for scheduled scrape session.");
         await updateTwitterBlock(false, true); // false = unblock, true = temporary flag
+
+        // Give Chrome's declarativeNetRequest rules a moment to propagate
+        // to avoid "ERR_BLOCKED_BY_CLIENT" on the very first profile.
+        await new Promise(resolve => setTimeout(resolve, 2000));
     }
 
     for (let i = 0; i < categories.length; i++) {
@@ -229,6 +236,20 @@ async function scheduleCategoryScrapes() {
 }
 
 // ============================================================
+// WORKER: Scrapes a SINGLE category manually (user requested)
+// ============================================================
+async function startSingleCategoryScrape(categoryIndex) {
+    const { twitterBlocked } = await chrome.storage.local.get(['twitterBlocked']);
+    if (twitterBlocked) {
+        addLog(`Twitter is blocked. Temporarily unblocking for manual single category scrape.`);
+        await updateTwitterBlock(false, true); // false = unblock, true = temporary flag
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Delay for rules to propagate
+    }
+    console.log(`Manually running Category index ${categoryIndex}`);
+    scrapeAndDispatchCategory(categoryIndex);
+}
+
+// ============================================================
 // WORKER: Scrapes all profiles in ONE category and dispatches
 // the email. This is a completely self-contained unit of work.
 // ============================================================
@@ -246,95 +267,95 @@ async function scrapeAndDispatchCategory(categoryIndex) {
 
     try {
         let globalProcessedIds = processedTweetIds || [];
-    let allowDuplicates = settings?.allowDuplicates || false;
-    let newIdsThisCategory = new Set();
+        let allowDuplicates = settings?.allowDuplicates || false;
+        let newIdsThisCategory = new Set();
 
-    console.log(`=== BEGIN scrapeAndDispatchCategory: [${category.name}] (index ${categoryIndex}) ===`);
+        console.log(`=== BEGIN scrapeAndDispatchCategory: [${category.name}] (index ${categoryIndex}) ===`);
 
-    let compilationPayload = {
-        [category.name]: {
-            extraEmails: category.enableExtraEmails !== false ? (category.extraEmails || '') : '',
-            profiles: []
+        let compilationPayload = {
+            [category.name]: {
+                extraEmails: category.enableExtraEmails !== false ? (category.extraEmails || '') : '',
+                profiles: []
+            }
+        };
+
+        for (const profile of (category.profiles || [])) {
+            if (profile.isActive === false) continue;
+
+            try {
+                let targetUrl = profile.url;
+                if (profile.scrapeReplies) {
+                    try {
+                        const parsedUrl = new URL(targetUrl);
+                        parsedUrl.pathname = parsedUrl.pathname.replace(/\/+$/, '') + '/with_replies';
+                        targetUrl = parsedUrl.toString();
+                    } catch (e) {
+                        targetUrl = targetUrl.replace(/\/+$/, '') + '/with_replies';
+                    }
+                }
+
+                const globalProcessedIdsToPass = allowDuplicates ? [] : globalProcessedIds;
+                const scrapeResult = await scrapeProfile(targetUrl, globalProcessedIdsToPass, settings);
+                const rawTweets = scrapeResult.tweets || [];
+                const profileMeta = scrapeResult.profileMeta || {};
+
+                let novelTweets = [];
+                if (rawTweets.length > 0) {
+                    for (const t of rawTweets) {
+                        if (allowDuplicates || !globalProcessedIds.includes(t.id)) {
+                            novelTweets.push(t);
+                        }
+                        if (!globalProcessedIds.includes(t.id)) {
+                            newIdsThisCategory.add(t.id);
+                        }
+                    }
+                }
+
+                if (profile.scrapeRetweets === false) {
+                    novelTweets = novelTweets.filter(t => !t.isRetweet);
+                }
+
+                compilationPayload[category.name].profiles.push({
+                    url: profile.url,
+                    profileMeta,
+                    enableAiSummary: profile.enableAiSummary,
+                    scrapeRetweets: profile.scrapeRetweets !== false,
+                    tweets: novelTweets
+                });
+
+                // Brief delay between profile visits
+                await new Promise(r => setTimeout(r, 500));
+            } catch (err) {
+                console.error(`Failed to scrape ${profile.url} in ${category.name}:`, err);
+                compilationPayload[category.name].profiles.push({
+                    url: profile.url,
+                    profileMeta: {},
+                    enableAiSummary: profile.enableAiSummary,
+                    tweets: [],
+                    error: err.message || 'Error occurred during scraping'
+                });
+            }
         }
-    };
 
-    for (const profile of (category.profiles || [])) {
-        if (profile.isActive === false) continue;
-
+        // Dispatch email for this category
+        console.log(`Finished scraping [${category.name}]. Dispatching email...`);
         try {
-            let targetUrl = profile.url;
-            if (profile.scrapeReplies) {
-                try {
-                    const parsedUrl = new URL(targetUrl);
-                    parsedUrl.pathname = parsedUrl.pathname.replace(/\/+$/, '') + '/with_replies';
-                    targetUrl = parsedUrl.toString();
-                } catch (e) {
-                    targetUrl = targetUrl.replace(/\/+$/, '') + '/with_replies';
-                }
-            }
-
-            const globalProcessedIdsToPass = allowDuplicates ? [] : globalProcessedIds;
-            const scrapeResult = await scrapeProfile(targetUrl, globalProcessedIdsToPass, settings);
-            const rawTweets = scrapeResult.tweets || [];
-            const profileMeta = scrapeResult.profileMeta || {};
-
-            let novelTweets = [];
-            if (rawTweets.length > 0) {
-                for (const t of rawTweets) {
-                    if (allowDuplicates || !globalProcessedIds.includes(t.id)) {
-                        novelTweets.push(t);
-                    }
-                    if (!globalProcessedIds.includes(t.id)) {
-                        newIdsThisCategory.add(t.id);
-                    }
-                }
-            }
-
-            if (profile.scrapeRetweets === false) {
-                novelTweets = novelTweets.filter(t => !t.isRetweet);
-            }
-
-            compilationPayload[category.name].profiles.push({
-                url: profile.url,
-                profileMeta,
-                enableAiSummary: profile.enableAiSummary,
-                scrapeRetweets: profile.scrapeRetweets !== false,
-                tweets: novelTweets
-            });
-
-            // Brief delay between profile visits
-            await new Promise(r => setTimeout(r, 500));
-        } catch (err) {
-            console.error(`Failed to scrape ${profile.url} in ${category.name}:`, err);
-            compilationPayload[category.name].profiles.push({
-                url: profile.url,
-                profileMeta: {},
-                enableAiSummary: profile.enableAiSummary,
-                tweets: [],
-                error: err.message || 'Error occurred during scraping'
-            });
+            await processAndDispatch(compilationPayload);
+        } catch (dispatchErr) {
+            console.error(`CRITICAL: processAndDispatch failed for ${category.name}:`, dispatchErr);
         }
-    }
 
-    // Dispatch email for this category
-    console.log(`Finished scraping [${category.name}]. Dispatching email...`);
-    try {
-        await processAndDispatch(compilationPayload);
-    } catch (dispatchErr) {
-        console.error(`CRITICAL: processAndDispatch failed for ${category.name}:`, dispatchErr);
-    }
+        // Save new IDs
+        if (newIdsThisCategory.size > 0) {
+            // Re-read to avoid overwriting IDs saved by a concurrently running category
+            const { processedTweetIds: latestIds } = await chrome.storage.local.get(['processedTweetIds']);
+            let combinedIds = [...(latestIds || []), ...newIdsThisCategory];
+            if (combinedIds.length > 5000) combinedIds = combinedIds.slice(combinedIds.length - 5000);
+            await chrome.storage.local.set({ processedTweetIds: combinedIds });
+            console.log(`Saved ${newIdsThisCategory.size} new tweet IDs for [${category.name}].`);
+        }
 
-    // Save new IDs
-    if (newIdsThisCategory.size > 0) {
-        // Re-read to avoid overwriting IDs saved by a concurrently running category
-        const { processedTweetIds: latestIds } = await chrome.storage.local.get(['processedTweetIds']);
-        let combinedIds = [...(latestIds || []), ...newIdsThisCategory];
-        if (combinedIds.length > 5000) combinedIds = combinedIds.slice(combinedIds.length - 5000);
-        await chrome.storage.local.set({ processedTweetIds: combinedIds });
-        console.log(`Saved ${newIdsThisCategory.size} new tweet IDs for [${category.name}].`);
-    }
-
-    console.log(`=== END scrapeAndDispatchCategory: [${category.name}] ===`);
+        console.log(`=== END scrapeAndDispatchCategory: [${category.name}] ===`);
 
     } finally {
         // Decrement active scraping tasks count
@@ -345,7 +366,7 @@ async function scrapeAndDispatchCategory(categoryIndex) {
         // Check if this was the last category scheduled
         const allAlarms = await chrome.alarms.getAll();
         const activeCategoryAlarms = allAlarms.filter(a => a.name.startsWith("scrapeCategory_"));
-        
+
         if (remainingTasks === 0 && activeCategoryAlarms.length === 0) {
             const { twitterWasBlockedTemporarily } = await chrome.storage.local.get(['twitterWasBlockedTemporarily']);
             if (twitterWasBlockedTemporarily) {
@@ -381,6 +402,7 @@ async function scrapeProfile(url, globalProcessedIds = [], settings = {}, _retry
         if (twitterBlocked) {
             addLog("Twitter was found blocked mid-scrape. Force unblocking temporarily to proceed.");
             await updateTwitterBlock(false, true);
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Delay for rules to propagate
         }
 
         chrome.tabs.create({ url, active: false }, async (tab) => {
@@ -394,7 +416,7 @@ async function scrapeProfile(url, globalProcessedIds = [], settings = {}, _retry
             // Safety timeout — if the tab never completes, clean up and fail
             const safetyTimer = setTimeout(() => {
                 chrome.tabs.onUpdated.removeListener(listener);
-                try { chrome.tabs.remove(tab.id); } catch (_) {}
+                try { chrome.tabs.remove(tab.id); } catch (_) { }
                 settle(reject, new Error(`Tab timed out after ${TAB_TIMEOUT_MS / 1000}s for ${url}`));
             }, TAB_TIMEOUT_MS);
 
@@ -411,7 +433,7 @@ async function scrapeProfile(url, globalProcessedIds = [], settings = {}, _retry
 
                     if (isErrorPage) {
                         console.warn(`Tab for ${url} landed on error page (${tabUrl}).`);
-                        try { chrome.tabs.remove(tab.id); } catch (_) {}
+                        try { chrome.tabs.remove(tab.id); } catch (_) { }
 
                         if (_retryCount < MAX_RETRIES) {
                             console.log(`Retrying ${url} in ${RETRY_DELAY_MS / 1000}s (attempt ${_retryCount + 1})...`);
@@ -449,8 +471,20 @@ async function scrapeProfile(url, globalProcessedIds = [], settings = {}, _retry
                             }, 1500);
                         });
                     }).catch(err => {
-                        chrome.tabs.remove(tab.id);
-                        settle(reject, err);
+                        console.warn(`executeScript failed for ${url}:`, err.message);
+                        try { chrome.tabs.remove(tab.id); } catch (_) { }
+
+                        // If it's an error page that wasn't caught by the URL check (e.g., declarativeNetRequest block)
+                        if (err.message && err.message.includes('error page') && _retryCount < MAX_RETRIES) {
+                            console.log(`Retrying ${url} in ${RETRY_DELAY_MS / 1000}s (attempt ${_retryCount + 1}) due to executeScript error page...`);
+                            setTimeout(() => {
+                                scrapeProfile(url, globalProcessedIds, settings, _retryCount + 1)
+                                    .then(resolve)
+                                    .catch(reject);
+                            }, RETRY_DELAY_MS);
+                        } else {
+                            settle(reject, err);
+                        }
                     });
                 });
             }
@@ -623,7 +657,7 @@ async function processAndDispatch(payload) {
 
             const maxDisplayTweets = 30;
             const tweetsToDisplay = profile.tweets.slice(0, maxDisplayTweets);
-            
+
             tweetsToDisplay.forEach((t, idx) => {
                 const dateStr = new Date(t.timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
                 const isLast = idx === tweetsToDisplay.length - 1;
@@ -659,10 +693,10 @@ async function processAndDispatch(payload) {
                   <div style="font-size:13px; color:#374151; line-height:1.5; word-break:break-word;
                               font-style:italic;">
                     ${t.replyContext.text
-                        ? (t.replyContext.text.length > 280
-                            ? t.replyContext.text.slice(0, 280) + '…'
-                            : t.replyContext.text)
-                        : '<span style="color:#9ca3af;">[original tweet not available]</span>'}
+                            ? (t.replyContext.text.length > 280
+                                ? t.replyContext.text.slice(0, 280) + '…'
+                                : t.replyContext.text)
+                            : '<span style="color:#9ca3af;">[original tweet not available]</span>'}
                   </div>
                   ${t.replyContext.mediaUrls && t.replyContext.mediaUrls.length > 0 ? `
                   <div style="margin-top:8px;">
@@ -684,16 +718,16 @@ async function processAndDispatch(payload) {
                               margin-bottom:5px; letter-spacing:0.3px;">
                     🔗 Quoted tweet
                     ${t.quotedTweet.authorHandle || t.quotedTweet.authorName
-                        ? `· <span style="color:#4f46e5;">${t.quotedTweet.authorName || ''}${t.quotedTweet.authorHandle ? ' ' + t.quotedTweet.authorHandle : ''}</span>`
-                        : ''}
+                            ? `· <span style="color:#4f46e5;">${t.quotedTweet.authorName || ''}${t.quotedTweet.authorHandle ? ' ' + t.quotedTweet.authorHandle : ''}</span>`
+                            : ''}
                   </div>
                   <div style="font-size:13px; color:#374151; line-height:1.55;
                               word-break:break-word;">
                     ${t.quotedTweet.text
-                        ? (t.quotedTweet.text.length > 280
-                            ? t.quotedTweet.text.slice(0, 280) + '…'
-                            : t.quotedTweet.text)
-                        : '<span style="color:#9ca3af; font-style:italic;">[quoted tweet text not available]</span>'}
+                            ? (t.quotedTweet.text.length > 280
+                                ? t.quotedTweet.text.slice(0, 280) + '…'
+                                : t.quotedTweet.text)
+                            : '<span style="color:#9ca3af; font-style:italic;">[quoted tweet text not available]</span>'}
                   </div>
                   ${t.quotedTweet.mediaUrls && t.quotedTweet.mediaUrls.length > 0 ? `
                   <div style="margin-top:8px;">
@@ -711,7 +745,7 @@ async function processAndDispatch(payload) {
               </div>
                 `;
             });
-            
+
             if (profile.tweets.length > maxDisplayTweets) {
                 categoryHtml += `
                 <div style="padding: 12px 0; text-align: center; border-top: 1px solid #e5e7eb;">
