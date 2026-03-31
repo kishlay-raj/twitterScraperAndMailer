@@ -117,6 +117,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === "dailyScrapeAlarm") {
         console.log("Scheduled Scrape Alarm triggered!");
         scheduleCategoryScrapes();
+    } else if (alarm.name === "dailyUnblockAlarm") {
+        handleDailyUnblock();
     } else if (alarm.name.startsWith("scrapeCategory_")) {
         const categoryIndex = parseInt(alarm.name.split("_")[1]);
         console.log(`Category Alarm triggered for index ${categoryIndex}!`);
@@ -135,6 +137,7 @@ async function updateSchedule(settings) {
 
     // Clear existing schedule alarm to recreate or disable
     await chrome.alarms.clear("dailyScrapeAlarm");
+    await chrome.alarms.clear("dailyUnblockAlarm");
 
     if (settings.enableSchedule && settings.scheduleTime) {
         console.log(`Setting up daily scrape alarm for ${settings.scheduleTime}`);
@@ -154,6 +157,12 @@ async function updateSchedule(settings) {
         chrome.alarms.create("dailyScrapeAlarm", {
             when: nextRun.getTime(),
             periodInMinutes: 24 * 60 // 24 hours
+        });
+
+        // Create an alarm 5 minutes prior to unblock Twitter cleanly in advance
+        chrome.alarms.create("dailyUnblockAlarm", {
+            when: nextRun.getTime() - (5 * 60 * 1000), // 5 mins before
+            periodInMinutes: 24 * 60
         });
 
         console.log(`Next run scheduled for ${nextRun.toLocaleString()}`);
@@ -230,7 +239,13 @@ async function scrapeAndDispatchCategory(categoryIndex) {
     const category = categories[categoryIndex];
     if (category.isActive === false) return;
 
-    let globalProcessedIds = processedTweetIds || [];
+    // Increment active scraping tasks count
+    const state = await chrome.storage.local.get(['activeScrapingTasks']);
+    let currentTasks = (state.activeScrapingTasks || 0) + 1;
+    await chrome.storage.local.set({ activeScrapingTasks: currentTasks });
+
+    try {
+        let globalProcessedIds = processedTweetIds || [];
     let allowDuplicates = settings?.allowDuplicates || false;
     let newIdsThisCategory = new Set();
 
@@ -321,16 +336,33 @@ async function scrapeAndDispatchCategory(categoryIndex) {
 
     console.log(`=== END scrapeAndDispatchCategory: [${category.name}] ===`);
 
-    // Check if this was the last category scheduled
-    const allAlarms = await chrome.alarms.getAll();
-    const activeCategoryAlarms = allAlarms.filter(a => a.name.startsWith("scrapeCategory_"));
-    
-    if (activeCategoryAlarms.length === 0) {
-        const { twitterWasBlockedTemporarily } = await chrome.storage.local.get(['twitterWasBlockedTemporarily']);
-        if (twitterWasBlockedTemporarily) {
-            addLog("All categories finished. Re-blocking Twitter as per user setting.");
-            await updateTwitterBlock(true); // Re-block
+    } finally {
+        // Decrement active scraping tasks count
+        const finalState = await chrome.storage.local.get(['activeScrapingTasks']);
+        let remainingTasks = Math.max((finalState.activeScrapingTasks || 1) - 1, 0);
+        await chrome.storage.local.set({ activeScrapingTasks: remainingTasks });
+
+        // Check if this was the last category scheduled
+        const allAlarms = await chrome.alarms.getAll();
+        const activeCategoryAlarms = allAlarms.filter(a => a.name.startsWith("scrapeCategory_"));
+        
+        if (remainingTasks === 0 && activeCategoryAlarms.length === 0) {
+            const { twitterWasBlockedTemporarily } = await chrome.storage.local.get(['twitterWasBlockedTemporarily']);
+            if (twitterWasBlockedTemporarily) {
+                addLog("All categories finished scraping. Re-blocking Twitter as per user setting.");
+                await updateTwitterBlock(true); // Re-block
+            }
         }
+    }
+}
+
+// Function to handle the 5-minute pre-unblock logic
+async function handleDailyUnblock() {
+    console.log("Pre-scrape Unblock Alarm triggered!");
+    const { twitterBlocked } = await chrome.storage.local.get(['twitterBlocked']);
+    if (twitterBlocked) {
+        addLog("Twitter is blocked. Pre-emptively unblocking 5 mins before scheduled scrape session.");
+        await updateTwitterBlock(false, true); // false = unblock, true = temporary flag
     }
 }
 
