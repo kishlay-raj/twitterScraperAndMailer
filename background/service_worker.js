@@ -90,29 +90,48 @@ async function updateTwitterBlock(shouldBlock, isTemporaryUnblock = false) {
     }
 }
 
+let logQueue = [];
+let isSavingLogs = false;
+
 /**
  * Adds a log entry to storage and prunes logs older than 2 days
  */
 async function addLog(message, level = "info") {
-    const { logs = [] } = await chrome.storage.local.get(['logs']);
-    const now = Date.now();
-    const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
-
-    // Prune old logs
-    const filteredLogs = logs.filter(log => (now - log.timestamp) < twoDaysMs);
-
-    // Add new log
-    filteredLogs.push({
-        timestamp: now,
+    console.log(`[${level.toUpperCase()}] ${message}`);
+    
+    logQueue.push({
+        timestamp: Date.now(),
         message,
         level
     });
 
-    // Keep only last 100 logs to prevent storage bloat
-    const limitedLogs = filteredLogs.slice(-100);
+    if (isSavingLogs) return;
+    isSavingLogs = true;
 
-    await chrome.storage.local.set({ logs: limitedLogs });
-    console.log(`[${level.toUpperCase()}] ${message}`);
+    try {
+        while (logQueue.length > 0) {
+            // Grab the current batch of queued logs
+            const batch = [...logQueue];
+            logQueue = [];
+
+            const { logs = [] } = await chrome.storage.local.get(['logs']);
+            const now = Date.now();
+            const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
+
+            // Prune old logs
+            const filteredLogs = logs.filter(log => (now - log.timestamp) < twoDaysMs);
+
+            // Add new logs
+            filteredLogs.push(...batch);
+
+            // Keep only last 500 logs to prevent storage bloat
+            const limitedLogs = filteredLogs.slice(-500);
+
+            await chrome.storage.local.set({ logs: limitedLogs });
+        }
+    } finally {
+        isSavingLogs = false;
+    }
 }
 
 // Alarm Listener
@@ -199,6 +218,13 @@ async function scheduleCategoryScrapes() {
 
     const INTERVAL_MINUTES = 10; // 10 minutes between each category
     let scheduledCount = 0;
+
+    // ✅ Reset the active-tasks counter before starting a fresh batch.
+    // If the previous run crashed, this counter could be stuck at a non-zero
+    // value, causing the "all done" check inside scrapeAndDispatchCategory to
+    // misfire (re-blocking Twitter early and corrupting the counter for all
+    // subsequent categories in this run).
+    await chrome.storage.local.set({ activeScrapingTasks: 0 });
 
     // Check if we need to temporarily unblock
     const { twitterBlocked } = await chrome.storage.local.get(['twitterBlocked']);
