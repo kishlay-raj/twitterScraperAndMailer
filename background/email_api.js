@@ -29,12 +29,22 @@ async function sendEmailPayload(htmlContent, recipientEmail, webhookUrl, customS
             body: JSON.stringify(payload)
         });
 
+        const rawText = await response.text();
+
         if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`Webhook Error: ${response.status} - ${errText}`);
+            throw new Error(`Webhook Error: ${response.status} - ${rawText.slice(0, 500)}`);
         }
 
-        const data = await response.json();
+        let data;
+        try {
+            data = JSON.parse(rawText);
+        } catch (_) {
+            // Apps Script returned HTML (e.g. an error page) instead of JSON.
+            // Log the first 500 chars so we can diagnose without crashing.
+            console.error("Email API: Apps Script returned non-JSON response:", rawText.slice(0, 500));
+            return;
+        }
+
         if (data.status === "success") {
             console.log("Email dispatched successfully via Apps Script Webhook!");
         } else {

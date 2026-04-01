@@ -500,8 +500,15 @@ async function scrapeProfile(url, globalProcessedIds = [], settings = {}, _retry
                         console.warn(`executeScript failed for ${url}:`, err.message);
                         try { chrome.tabs.remove(tab.id); } catch (_) { }
 
-                        // If it's an error page that wasn't caught by the URL check (e.g., declarativeNetRequest block)
-                        if (err.message && err.message.includes('error page') && _retryCount < MAX_RETRIES) {
+                        // Catch both "error page" generic messages AND the specific Chrome error
+                        // "Frame with ID 0 is showing error page" which is thrown by the browser
+                        // before our URL-based detection can run (e.g. for rate-limited profiles).
+                        const isErrorPage = err.message && (
+                            err.message.includes('error page') ||
+                            err.message.includes('Frame with ID')
+                        );
+
+                        if (isErrorPage && _retryCount < MAX_RETRIES) {
                             console.log(`Retrying ${url} in ${RETRY_DELAY_MS / 1000}s (attempt ${_retryCount + 1}) due to executeScript error page...`);
                             setTimeout(() => {
                                 scrapeProfile(url, globalProcessedIds, settings, _retryCount + 1)
@@ -681,7 +688,7 @@ async function processAndDispatch(payload) {
             <td style="padding:10px 28px 20px 28px;">
             `;
 
-            const maxDisplayTweets = 30;
+            const maxDisplayTweets = 15;
             const tweetsToDisplay = profile.tweets.slice(0, maxDisplayTweets);
 
             tweetsToDisplay.forEach((t, idx) => {
@@ -810,6 +817,23 @@ async function processAndDispatch(payload) {
 
         addLog(`Compilation complete for ${categoryName}. Dispatching email...`);
         const emailSubject = `Curation: ${categoryName}`;
+
+        // Hard-cap the HTML body at 1.4MB to stay within Gmail / Apps Script limits (~2MB cap).
+        // If truncated, append a notice so the reader knows content was cut.
+        const MAX_BODY_BYTES = 1.4 * 1024 * 1024; // 1.4 MB
+        const encoder = new TextEncoder();
+        if (encoder.encode(categoryHtml).length > MAX_BODY_BYTES) {
+            // Truncate to a safe byte length then close all open HTML tags cleanly.
+            let truncated = categoryHtml.slice(0, MAX_BODY_BYTES);
+            // Trim back to the last complete tag boundary to avoid broken HTML.
+            const lastClose = truncated.lastIndexOf('>');
+            if (lastClose !== -1) truncated = truncated.slice(0, lastClose + 1);
+            categoryHtml = truncated +
+                `<tr><td style="padding:16px 28px; font-size:13px; color:#b91c1c; font-style:italic;">
+                ⚠️ Email truncated due to size limits. Visit the X profiles directly for the full digest.
+                </td></tr></table></div>`;
+            addLog(`[${categoryName}] Email body was truncated to stay within size limits.`, "warn");
+        }
 
         let allRecipients = recipientEmail;
         if (extraEmails) {
