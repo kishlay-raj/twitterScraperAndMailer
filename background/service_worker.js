@@ -557,35 +557,8 @@ async function processAndDispatch(payload) {
             return 0;
         });
 
-        // ── Outer wrapper: max 600px, centered, white background ──────────────────
-        let categoryHtml = `
-        <div style="background:#f4f4f5; padding:24px 12px; font-family:Arial,Helvetica,sans-serif;">
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0"
-               style="width:100%; max-width:600px; margin:0 auto; background:#ffffff;
-                      border-radius:12px; overflow:hidden;
-                      box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-
-          <!-- ── HEADER BANNER ── -->
-          <tr>
-            <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);
-                        padding:28px 28px 20px 28px; text-align:center;">
-              <div style="font-size:22px; font-weight:700; color:#ffffff;
-                          letter-spacing:-0.3px;">🛰️ DailyUpdates Curation</div>
-              <div style="font-size:13px; color:#c7d2fe; margin-top:4px;">${categoryName}</div>
-            </td>
-          </tr>
-
-          <!-- ── INTRO TEXT ── -->
-          <tr>
-            <td style="padding:20px 28px 8px 28px;">
-              <p style="margin:0; font-size:14px; color:#6b7280; line-height:1.6;">
-                Your 24-hour digest from X profiles in
-                <strong style="color:#111827;">${categoryName}</strong>.
-              </p>
-            </td>
-          </tr>
-
-        `;
+        // ── Build per-profile HTML blocks so we can chunk them across emails ──
+        const profileHtmlBlocks = [];
 
         for (const profile of sortedProfiles) {
             const meta = profile.profileMeta || {};
@@ -594,7 +567,7 @@ async function processAndDispatch(payload) {
             const avatarUrl = meta.profileAvatarUrl || '';
 
             // ── Profile section separator ──────────────────────────────────────────
-            categoryHtml += `
+            let profileHtml = `
           <!-- ── PROFILE CARD ── -->
           <tr>
             <td style="padding:16px 28px 0 28px;">
@@ -634,7 +607,7 @@ async function processAndDispatch(payload) {
             `;
 
             if (profile.error) {
-                categoryHtml += `
+                profileHtml += `
           <tr>
             <td style="padding:10px 28px 16px 28px;">
               <div style="background:#fef2f2; border-left:4px solid #ef4444;
@@ -645,11 +618,12 @@ async function processAndDispatch(payload) {
             </td>
           </tr>
                 `;
+                profileHtmlBlocks.push(profileHtml);
                 continue;
             }
 
             if (profile.tweets.length === 0) {
-                categoryHtml += `
+                profileHtml += `
           <tr>
             <td style="padding:10px 28px 20px 28px;">
               <div style="background:#fffbeb; border-left:4px solid #fbbf24;
@@ -660,12 +634,13 @@ async function processAndDispatch(payload) {
             </td>
           </tr>
                 `;
+                profileHtmlBlocks.push(profileHtml);
                 continue;
             }
 
             if (profile.enableAiSummary) {
                 const summary = await summarizeTweets(profile.tweets, llmApiKey);
-                categoryHtml += `
+                profileHtml += `
           <tr>
             <td style="padding:12px 28px 4px 28px;">
               <div style="background:#f0fdf4; border-left:4px solid #22c55e;
@@ -683,7 +658,7 @@ async function processAndDispatch(payload) {
             }
 
             // ── Individual tweets ──────────────────────────────────────────────────
-            categoryHtml += `
+            profileHtml += `
           <tr>
             <td style="padding:10px 28px 20px 28px;">
             `;
@@ -700,7 +675,7 @@ async function processAndDispatch(payload) {
                 const border = t.isSubscriberOnly ? 'border:1.5px solid #fbcfe8; border-radius:8px;' : '';
                 const padding = t.isSubscriberOnly ? 'padding:14px;' : `padding:12px 0; ${borderBottom}`;
 
-                categoryHtml += `
+                profileHtml += `
               <div style="background:${bgColor}; ${border} ${padding} margin-bottom:${t.isSubscriberOnly ? '10px' : '0'};">
 
                 <!-- Date + badges row -->
@@ -780,7 +755,7 @@ async function processAndDispatch(payload) {
             });
 
             if (profile.tweets.length > maxDisplayTweets) {
-                categoryHtml += `
+                profileHtml += `
                 <div style="padding: 12px 0; text-align: center; border-top: 1px solid #e5e7eb;">
                   <a href="${profile.url}" style="font-size:13px; color:#6366f1; font-weight:600; text-decoration:none;">
                     + ${profile.tweets.length - maxDisplayTweets} more tweets... View Full Profile
@@ -789,15 +764,51 @@ async function processAndDispatch(payload) {
                 `;
             }
 
-            categoryHtml += `
+            profileHtml += `
             </td>
           </tr>
             `;
 
+            profileHtmlBlocks.push(profileHtml);
+
         } // End profile loop
 
-        // ── Footer ────────────────────────────────────────────────────────────────
-        categoryHtml += `
+        // ── Helper to wrap profile blocks in a complete email HTML shell ──────
+        const MAX_BODY_BYTES = 180 * 1024; // 180 KB — Apps Script MailApp limit is ~200KB
+        const encoder = new TextEncoder();
+
+        function buildEmailShell(categoryName, partLabel, profileBlocks) {
+            const header = `
+        <div style="background:#f4f4f5; padding:24px 12px; font-family:Arial,Helvetica,sans-serif;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+               style="width:100%; max-width:600px; margin:0 auto; background:#ffffff;
+                      border-radius:12px; overflow:hidden;
+                      box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+
+          <!-- ── HEADER BANNER ── -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);
+                        padding:28px 28px 20px 28px; text-align:center;">
+              <div style="font-size:22px; font-weight:700; color:#ffffff;
+                          letter-spacing:-0.3px;">🛰️ DailyUpdates Curation</div>
+              <div style="font-size:13px; color:#c7d2fe; margin-top:4px;">${categoryName}${partLabel ? ` — ${partLabel}` : ''}</div>
+            </td>
+          </tr>
+
+          <!-- ── INTRO TEXT ── -->
+          <tr>
+            <td style="padding:20px 28px 8px 28px;">
+              <p style="margin:0; font-size:14px; color:#6b7280; line-height:1.6;">
+                Your 24-hour digest from X profiles in
+                <strong style="color:#111827;">${categoryName}</strong>.
+                ${partLabel ? `<br/><span style="font-size:12px; color:#9ca3af;">(${partLabel})</span>` : ''}
+              </p>
+            </td>
+          </tr>
+
+            `;
+
+            const footer = `
 
           <!-- ── FOOTER ── -->
           <tr>
@@ -813,31 +824,41 @@ async function processAndDispatch(payload) {
 
         </table>
         </div>
-        `;
+            `;
 
-        addLog(`Compilation complete for ${categoryName}. Dispatching email...`);
-        const emailSubject = `Curation: ${categoryName}`;
-
-        // Hard-cap the HTML body at 1.4MB to stay within Gmail / Apps Script limits (~2MB cap).
-        // If truncated, append a notice so the reader knows content was cut.
-        const MAX_BODY_BYTES = 1.4 * 1024 * 1024; // 1.4 MB
-        const encoder = new TextEncoder();
-        if (encoder.encode(categoryHtml).length > MAX_BODY_BYTES) {
-            // Truncate to a safe byte length then close all open HTML tags cleanly.
-            let truncated = categoryHtml.slice(0, MAX_BODY_BYTES);
-            // Trim back to the last complete tag boundary to avoid broken HTML.
-            const lastClose = truncated.lastIndexOf('>');
-            if (lastClose !== -1) truncated = truncated.slice(0, lastClose + 1);
-            categoryHtml = truncated +
-                `<tr><td style="padding:16px 28px; font-size:13px; color:#b91c1c; font-style:italic;">
-                ⚠️ Email truncated due to size limits. Visit the X profiles directly for the full digest.
-                </td></tr></table></div>`;
-            addLog(`[${categoryName}] Email body was truncated to stay within size limits.`, "warn");
+            return header + profileBlocks.join('') + footer;
         }
+
+        // ── Chunk profiles into emails that fit under the size limit ──────────
+        const emailChunks = []; // each entry is an array of profileHtml strings
+        let currentChunk = [];
+        let currentChunkSize = 0;
+        // Approximate shell overhead (header + footer without profiles)
+        const shellOverhead = encoder.encode(buildEmailShell(categoryName, 'Part 1', [])).length;
+
+        for (const block of profileHtmlBlocks) {
+            const blockSize = encoder.encode(block).length;
+
+            // If adding this profile would exceed the limit, start a new chunk
+            // (unless the chunk is empty — a single profile must go in at least one email)
+            if (currentChunk.length > 0 && (currentChunkSize + blockSize + shellOverhead) > MAX_BODY_BYTES) {
+                emailChunks.push(currentChunk);
+                currentChunk = [];
+                currentChunkSize = 0;
+            }
+
+            currentChunk.push(block);
+            currentChunkSize += blockSize;
+        }
+        if (currentChunk.length > 0) {
+            emailChunks.push(currentChunk);
+        }
+
+        // ── Assemble & send each chunk as a separate email ───────────────────
+        addLog(`Compilation complete for ${categoryName}. ${emailChunks.length} email(s) to send.`);
 
         let allRecipients = recipientEmail;
         if (extraEmails) {
-            // Clean up the comma separated list
             const extraList = extraEmails.split(',').map(e => e.trim()).filter(Boolean).join(',');
             if (extraList && extraList.length > 0) {
                 allRecipients = `${recipientEmail},${extraList}`;
@@ -845,9 +866,25 @@ async function processAndDispatch(payload) {
             }
         }
 
-        // 1. Send to all recipients in the "To" field
-        addLog(`Dispatching category email for [${categoryName}] to: ${allRecipients}`);
-        await sendEmailPayload(categoryHtml, allRecipients, webhookUrl, emailSubject, null);
+        for (let ci = 0; ci < emailChunks.length; ci++) {
+            const partLabel = emailChunks.length > 1 ? `Part ${ci + 1} of ${emailChunks.length}` : '';
+            const emailSubject = `Curation: ${categoryName}${partLabel ? ` (${partLabel})` : ''}`;
+            const emailHtml = buildEmailShell(categoryName, partLabel, emailChunks[ci]);
+            const bodySizeKB = (encoder.encode(emailHtml).length / 1024).toFixed(1);
+
+            addLog(`Dispatching [${categoryName}]${partLabel ? ` ${partLabel}` : ''} to: ${allRecipients} (${bodySizeKB} KB)`);
+            try {
+                await sendEmailPayload(emailHtml, allRecipients, webhookUrl, emailSubject, null);
+                addLog(`✅ Email for [${categoryName}]${partLabel ? ` ${partLabel}` : ''} dispatched successfully.`);
+            } catch (emailErr) {
+                addLog(`❌ Email dispatch FAILED for [${categoryName}]${partLabel ? ` ${partLabel}` : ''}: ${emailErr.message}`, "error");
+            }
+
+            // Brief delay between multi-part emails
+            if (ci < emailChunks.length - 1) {
+                await new Promise(r => setTimeout(r, 1500));
+            }
+        }
 
         // Wait 1.5s between categories to avoid concurrent webhook limits
         await new Promise(r => setTimeout(r, 1500));

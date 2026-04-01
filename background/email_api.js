@@ -32,26 +32,30 @@ async function sendEmailPayload(htmlContent, recipientEmail, webhookUrl, customS
         const rawText = await response.text();
 
         if (!response.ok) {
-            throw new Error(`Webhook Error: ${response.status} - ${rawText.slice(0, 500)}`);
+            throw new Error(`Webhook Error (HTTP ${response.status}): ${rawText.slice(0, 500)}`);
         }
 
         let data;
         try {
             data = JSON.parse(rawText);
         } catch (_) {
-            // Apps Script returned HTML (e.g. an error page) instead of JSON.
-            // Log the first 500 chars so we can diagnose without crashing.
-            console.error("Email API: Apps Script returned non-JSON response:", rawText.slice(0, 500));
-            return;
+            // Apps Script returned HTML (e.g. a redirect/login page) instead of JSON.
+            // This usually means the webhook URL is invalid or the Apps Script deployment has an auth issue.
+            console.error("Email API: Apps Script returned non-JSON (likely HTML redirect):", rawText.slice(0, 300));
+            throw new Error(`Apps Script returned HTML instead of JSON. Check webhook URL & deployment settings. Preview: ${rawText.slice(0, 150)}`);
         }
 
         if (data.status === "success") {
             console.log("Email dispatched successfully via Apps Script Webhook!");
         } else {
-            console.error("Apps Script Error:", data.message);
+            // Surface the Apps Script error (e.g. "Limit Exceeded: Email Body Size")
+            const errMsg = data.message || JSON.stringify(data);
+            console.error("Apps Script Error:", errMsg);
+            throw new Error(`Apps Script Error: ${errMsg}`);
         }
     } catch (err) {
-        console.error("Email API failed:", err);
+        console.error("Email API failed:", err.message || err);
+        throw err; // Re-throw so the caller (processAndDispatch) can handle / log it
     }
 }
 
