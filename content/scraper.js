@@ -141,18 +141,15 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
         let addedNewTweetThisCycle = false;
         let lastSkippedParentTweetCell = null;
 
-        bgLog(`Analyzing ${tweetElements.length} tweets on screen...`);
+        const prevCount = tweetsData.length;
         for (const tweetEl of tweetElements) {
             // Identify unique tweet (simplest way is by link) for logging purposes
             const linkEl = tweetEl.querySelector('a[href*="/status/"]');
             const tweetUrl = linkEl ? linkEl.href : 'Unknown URL';
             const tweetId = tweetUrl.split('/status/')[1]?.split('?')[0] || 'Unknown ID';
 
-            bgLog(`\n--- Looking at Tweet: ${tweetUrl} ---`);
-
             if (processedTweetIds.has(tweetId)) {
-                bgLog(`Skipping: Already processed ${tweetId}`);
-                continue;
+                continue; // silently skip already-seen tweets
             }
 
             // Skip pinned tweets completely so they don't trigger the 24-hour stop condition
@@ -179,12 +176,12 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
             const ageMs = startTime - tweetTime;
             const ageHours = (ageMs / (1000 * 60 * 60)).toFixed(1);
 
-            bgLog(`-> Age: ${ageHours} hours old.`);
+            bgLog(`-> Age: ${ageHours}h | ${tweetUrl}`);
 
             // Check if older than scrape duration limit
             if (ageMs > durationLimitMs) {
                 const limitHours = (durationLimitMs / (1000 * 60 * 60)).toFixed(1);
-                bgLog(`-> Skipping: Tweet is older than ${limitHours} hours limit.`);
+                bgLog(`-> Skipping: ${ageHours}h > ${limitHours}h limit. Stopping profile.`);
                 if (tweetId !== 'Unknown ID') processedTweetIds.add(tweetId);
                 continue;
             }
@@ -294,7 +291,8 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
                 }
             }
 
-            bgLog(`  -> Media found: ${mediaUrls.length} main, ${qMediaUrls.length} quoted. URLs: ${JSON.stringify(mediaUrls)}`);
+            // (media logged at summary level below)
+
 
 
             // Construct quoted tweet object
@@ -431,6 +429,11 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
             bgLog(`Scraping interrupted: Approaching Chrome 5-minute timeout. Sending available data.`);
             break;
         }
+        const newThisBatch = tweetsData.length - prevCount;
+        if (newThisBatch > 0) {
+            bgLog(`Batch: ${newThisBatch} new tweet(s) accepted (${tweetElements.length} on screen, ${tweetsData.length} total so far).`);
+        }
+
         if (!addedNewTweetThisCycle) {
             attemptsWithNoNewTweets++;
         } else {

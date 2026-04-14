@@ -124,8 +124,8 @@ async function addLog(message, level = "info") {
             // Add new logs
             filteredLogs.push(...batch);
 
-            // Keep only last 500 logs to prevent storage bloat
-            const limitedLogs = filteredLogs.slice(-500);
+            // Keep only last 1500 logs to prevent storage bloat
+            const limitedLogs = filteredLogs.slice(-1500);
 
             await chrome.storage.local.set({ logs: limitedLogs });
         }
@@ -301,6 +301,8 @@ async function scrapeAndDispatchCategory(categoryIndex) {
         let compilationPayload = {
             [category.name]: {
                 extraEmails: category.enableExtraEmails !== false ? (category.extraEmails || '') : '',
+                enableCategorySummary: category.enableCategorySummary === true,
+                summaryPrompt: category.summaryPrompt || '',
                 profiles: []
             }
         };
@@ -538,7 +540,7 @@ async function processAndDispatch(payload) {
     }
 
     console.log("Settings retrieved from storage:", settings);
-    const { llmApiKey, emailApiKey: webhookUrl, recipientEmail } = settings;
+    const { geminiApiKey, llmApiKey, emailApiKey: webhookUrl, recipientEmail } = settings;
 
     if (!webhookUrl || !recipientEmail) {
         console.error(`Missing settings before dispatch! Webhook: ${webhookUrl}, Recipient: ${recipientEmail}. Please save settings in the popup!`);
@@ -546,7 +548,7 @@ async function processAndDispatch(payload) {
     }
 
     for (const [categoryName, categoryData] of Object.entries(payload)) {
-        const { extraEmails, profiles } = categoryData;
+        const { extraEmails, profiles, enableCategorySummary, summaryPrompt } = categoryData;
 
         // Sort: profiles with tweets first, "no new updates" profiles last
         const sortedProfiles = [...profiles].sort((a, b) => {
@@ -639,7 +641,7 @@ async function processAndDispatch(payload) {
             }
 
             if (profile.enableAiSummary) {
-                const summary = await summarizeTweets(profile.tweets, llmApiKey);
+                const summary = await summarizeTweets(profile.tweets, geminiApiKey, llmApiKey, summaryPrompt);
                 profileHtml += `
           <tr>
             <td style="padding:12px 28px 4px 28px;">
@@ -773,6 +775,89 @@ async function processAndDispatch(payload) {
 
         } // End profile loop
 
+        // ── Category-level AI Summary Block (prepended before profiles) ──────
+        const categorySummaryBlocks = [];
+        if (enableCategorySummary) {
+            addLog(`[${categoryName}] Category Summarise is ON. Generating category-level summary...`);
+            // Use sortedProfiles for consistency with the HTML build order
+            const allTweetsInCategory = sortedProfiles
+                .filter(p => !p.error && p.tweets && p.tweets.length > 0)
+                .flatMap(p => p.tweets);
+
+            if (allTweetsInCategory.length > 0) {
+                // Cap at 60 most recent tweets to keep the LLM prompt manageable
+                const tweetsForSummary = allTweetsInCategory
+                    .sort((a, b) => b.timestamp - a.timestamp)
+                    .slice(0, 60);
+                addLog(`[${categoryName}] Summarising ${tweetsForSummary.length} of ${allTweetsInCategory.length} tweets (capped at 60 most recent).`);
+                const hasGeminiKey = geminiApiKey && geminiApiKey.trim().length > 0;
+                const hasHFKey = llmApiKey && llmApiKey.trim().length > 0;
+                addLog(`[${categoryName}] Calling LLM... (Gemini: ${hasGeminiKey ? '✅ key set' : '❌ not set'}, HuggingFace fallback: ${hasHFKey ? '✅ key set' : '❌ not set'})`);
+
+                let categorySummaryText = null;
+                try {
+                    categorySummaryText = await summarizeTweets(tweetsForSummary, geminiApiKey, llmApiKey, summaryPrompt);
+                    addLog(`[${categoryName}] LLM responded. Summary length: ${categorySummaryText?.length ?? 0} chars.`);
+                } catch (summaryErr) {
+                    addLog(`[${categoryName}] ⚠️ Summary error: ${summaryErr.message}. Email will be sent without summary.`);
+                }
+
+                if (categorySummaryText) {
+                    const totalProfiles = sortedProfiles.filter(p => p.tweets && p.tweets.length > 0).length;
+                    const totalTweets = allTweetsInCategory.length;
+
+                    const categorySummaryHtml = `
+          <!-- ── CATEGORY SUMMARY BLOCK ── -->
+          <tr>
+            <td style="padding:20px 28px 12px 28px;">
+              <div style="background:linear-gradient(135deg,#f5f3ff,#ede9fe);
+                          border:1.5px solid #a78bfa; border-radius:10px;
+                          padding:18px 20px;">
+                <div style="font-size:13px; font-weight:800; color:#6d28d9;
+                            text-transform:uppercase; letter-spacing:0.6px;
+                            margin-bottom:10px;">
+                  &#x2728; Category Summary
+                  <span style="font-size:11px; font-weight:500; color:#8b5cf6;
+                              text-transform:none; letter-spacing:0;
+                              background:#ede9fe; border-radius:10px;
+                              padding:2px 8px; margin-left:8px;">
+                    ${totalTweets} tweet${totalTweets !== 1 ? 's' : ''} across ${totalProfiles} profile${totalProfiles !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <div style="font-size:14px; color:#1c1917; line-height:1.75;">
+                  ${categorySummaryText}
+                </div>
+              </div>
+            </td>
+          </tr>
+          <!-- ── DIVIDER before individual profiles ── -->
+          <tr>
+            <td style="padding:4px 28px 10px 28px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;">
+                <tr>
+                  <td style="border-top:1px solid #e0e7ff; padding-right:10px;"></td>
+                  <td style="white-space:nowrap; font-size:11px; font-weight:700;
+                             color:#6366f1; text-transform:uppercase; letter-spacing:0.8px;
+                             padding:0 10px;">&#x1F4CB; Individual Profiles</td>
+                  <td style="border-top:1px solid #e0e7ff; padding-left:10px;"></td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+                    `;
+                    categorySummaryBlocks.push(categorySummaryHtml);
+                    addLog(`[${categoryName}] ✅ Category summary generated (${tweetsForSummary.length} tweets summarised).`);
+                } else {
+                    addLog(`[${categoryName}] ⚠️ Summary returned empty — email will be sent without summary block.`);
+                }
+            } else {
+                addLog(`[${categoryName}] Category summary skipped — no tweets found across any profile.`);
+            }
+        }
+
+        // Summary block first, then individual profile blocks
+        const allHtmlBlocks = [...categorySummaryBlocks, ...profileHtmlBlocks];
+
         // ── Helper to wrap profile blocks in a complete email HTML shell ──────
         const MAX_BODY_BYTES = 180 * 1024; // 180 KB — Apps Script MailApp limit is ~200KB
         const encoder = new TextEncoder();
@@ -836,7 +921,7 @@ async function processAndDispatch(payload) {
         // Approximate shell overhead (header + footer without profiles)
         const shellOverhead = encoder.encode(buildEmailShell(categoryName, 'Part 1', [])).length;
 
-        for (const block of profileHtmlBlocks) {
+        for (const block of allHtmlBlocks) {
             const blockSize = encoder.encode(block).length;
 
             // If adding this profile would exceed the limit, start a new chunk
@@ -868,7 +953,8 @@ async function processAndDispatch(payload) {
 
         for (let ci = 0; ci < emailChunks.length; ci++) {
             const partLabel = emailChunks.length > 1 ? `Part ${ci + 1} of ${emailChunks.length}` : '';
-            const emailSubject = `Curation: ${categoryName}${partLabel ? ` (${partLabel})` : ''}`;
+            const summaryPrefix = (enableCategorySummary && categorySummaryBlocks.length > 0) ? '✨ ' : '';
+            const emailSubject = `${summaryPrefix}Curation: ${categoryName}${partLabel ? ` (${partLabel})` : ''}`;
             const emailHtml = buildEmailShell(categoryName, partLabel, emailChunks[ci]);
             const bodySizeKB = (encoder.encode(emailHtml).length / 1024).toFixed(1);
 

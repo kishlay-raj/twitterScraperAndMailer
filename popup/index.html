@@ -38,12 +38,26 @@
     <section class="section settings-section">
       <h2>General Settings</h2>
       <div class="input-group">
-        <label for="llm-provider">Hugging Face Free API Token:</label>
-        <input type="password" id="llm-api-key" placeholder="hf_...">
+        <label for="gemini-api-key">
+          Google Gemini API Key:
+          <span style="font-size:0.75rem; font-weight:400; color:#7c3aed; margin-left:4px;">✨ Primary AI</span>
+        </label>
+        <input type="text" id="gemini-api-key" placeholder="AIza... (add multiple keys separated by commas)">
+        <div style="font-size:0.72rem; color:#6b7280; margin-top:3px;">
+          Separate multiple keys with commas — tried in order as fallback.
+          Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:#6366f1;">aistudio.google.com</a>
+        </div>
+      </div>
+      <div class="input-group">
+        <label for="llm-api-key">
+          Hugging Face Free API Token:
+          <span style="font-size:0.75rem; font-weight:400; color:#6b7280; margin-left:4px;">Fallback</span>
+        </label>
+        <input type="text" id="llm-api-key" placeholder="hf_...">
       </div>
       <div class="input-group">
         <label for="email-api-key">Google Apps Script Webhook URL:</label>
-        <input type="password" id="email-api-key" placeholder="https://script.google.com/macros/s/...">
+        <input type="text" id="email-api-key" placeholder="https://script.google.com/macros/s/...">
       </div>
       <div class="input-group">
         <label for="recipient-email">Recipient Email:</label>

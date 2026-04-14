@@ -2,6 +2,7 @@
 let state = {
   categories: [],
   settings: {
+    geminiApiKey: '',
     llmApiKey: '',
     emailApiKey: '',
     recipientEmail: '',
@@ -54,7 +55,7 @@ async function updateBlockButtonUI() {
 blockTwitterBtn.addEventListener('click', () => {
   const isCurrentlyBlocked = blockTwitterBtn.classList.contains('active');
   const shouldBlock = !isCurrentlyBlocked;
-  
+
   chrome.runtime.sendMessage({ action: "toggle_block", block: shouldBlock }, (response) => {
     if (response) updateBlockButtonUI();
   });
@@ -62,7 +63,7 @@ blockTwitterBtn.addEventListener('click', () => {
 
 async function renderLogs() {
   const { logs = [] } = await chrome.storage.local.get(['logs']);
-  
+
   if (logs.length === 0) {
     logsContainer.innerHTML = '<div class="log-entry">No logs yet.</div>';
     return;
@@ -88,6 +89,7 @@ async function loadState() {
   if (result.categories) state.categories = result.categories;
   if (result.settings) {
     state.settings = { ...state.settings, ...result.settings };
+    document.getElementById('gemini-api-key').value = state.settings.geminiApiKey || '';
     document.getElementById('llm-api-key').value = state.settings.llmApiKey || '';
     document.getElementById('email-api-key').value = state.settings.emailApiKey || '';
     document.getElementById('recipient-email').value = state.settings.recipientEmail || '';
@@ -127,21 +129,23 @@ function renderState() {
       <div class="profile-item">
         <div class="profile-info">
           <span class="profile-url" title="${profile.url}">${profile.url}</span>
-          <label class="toggle-group">
-            <input type="checkbox" class="ai-toggle" data-cat-id="${category.id}" data-profile-url="${profile.url}" ${profile.enableAiSummary ? 'checked' : ''}>
-            AI Summary
-          </label>
-          <label class="toggle-group" style="margin-left: 10px;">
-            <input type="checkbox" class="replies-toggle" data-cat-id="${category.id}" data-profile-url="${profile.url}" ${profile.scrapeReplies ? 'checked' : ''}>
-            Inc. Replies
-          </label>
-          <label class="toggle-group" style="margin-left: 10px;">
-            <input type="checkbox" class="retweets-toggle" data-cat-id="${category.id}" data-profile-url="${profile.url}" ${profile.scrapeRetweets !== false ? 'checked' : ''}>
-            Inc. Retweets
-          </label>
+          <div class="profile-toggles">
+            <label class="toggle-group">
+              <input type="checkbox" class="ai-toggle" data-cat-id="${category.id}" data-profile-url="${profile.url}" ${profile.enableAiSummary ? 'checked' : ''}>
+              AI Summary
+            </label>
+            <label class="toggle-group">
+              <input type="checkbox" class="replies-toggle" data-cat-id="${category.id}" data-profile-url="${profile.url}" ${profile.scrapeReplies ? 'checked' : ''}>
+              Replies
+            </label>
+            <label class="toggle-group">
+              <input type="checkbox" class="retweets-toggle" data-cat-id="${category.id}" data-profile-url="${profile.url}" ${profile.scrapeRetweets !== false ? 'checked' : ''}>
+              Retweets
+            </label>
+          </div>
         </div>
-        <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-end;">
-          <label class="toggle-group" style="color: #10b981; font-weight: bold;">
+        <div class="profile-side">
+          <label class="cat-badge cat-badge-active ${profile.isActive !== false ? 'is-on' : ''}" style="font-size:0.67rem;">
             <input type="checkbox" class="active-toggle" data-cat-id="${category.id}" data-profile-url="${profile.url}" ${profile.isActive !== false ? 'checked' : ''}>
             Active
           </label>
@@ -152,26 +156,36 @@ function renderState() {
 
     categoryEl.innerHTML = `
       <div class="category-header" style="cursor: pointer;">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <span class="collapse-icon" style="font-size: 0.7rem; color: #64748b;">${isExpanded ? '▼' : '▶'}</span>
-          <span>${category.name}</span>
+        <!-- Row 1: name + action buttons -->
+        <div class="cat-header-top">
+          <div class="cat-title">
+            <span class="collapse-icon">${isExpanded ? '▼' : '▶'}</span>
+            <span class="cat-name">${category.name}</span>
+          </div>
+          <div class="cat-actions">
+            <button class="btn-run-cat" data-id="${category.id}" title="Run this category now">▶ Run</button>
+            <button class="delete-btn btn-delete-cat" data-id="${category.id}">Delete</button>
+          </div>
         </div>
-        <div style="display: flex; gap: 10px; align-items: center;">
-          <button class="btn-run-cat" data-id="${category.id}" title="Run this category now">▶ Run</button>
-          <label class="toggle-group" style="color: #10b981; font-weight: bold; cursor: pointer;">
+        <!-- Row 2: pill badges -->
+        <div class="cat-badges">
+          <label class="cat-badge cat-badge-summarise ${category.enableCategorySummary ? 'is-on' : ''}" title="AI summary of all tweets in this category">
+            <input type="checkbox" class="cat-summarise-toggle" data-cat-id="${category.id}" ${category.enableCategorySummary ? 'checked' : ''}>
+            ✨ Summarise
+          </label>
+          <label class="cat-badge cat-badge-active ${category.isActive !== false ? 'is-on' : ''}">
             <input type="checkbox" class="cat-active-toggle" data-cat-id="${category.id}" ${category.isActive !== false ? 'checked' : ''}>
             Active
           </label>
-          <button class="delete-btn btn-delete-cat" data-id="${category.id}">Delete</button>
         </div>
-      </div >
+      </div>
       <div class="category-content">
         <div class="profiles-list">
           ${profilesHtml}
         </div>
         <div class="add-profile-form">
           <input type="text" class="new-profile-url" placeholder="https://x.com/username">
-            <button class="btn-add-profile" data-cat-id="${category.id}">Add</button>
+          <button class="btn-add-profile" data-cat-id="${category.id}">Add</button>
         </div>
         <div class="extra-emails-group">
           <label class="extra-emails-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
@@ -186,8 +200,17 @@ function renderState() {
             placeholder="extra@example.com, another@example.com"
           />
         </div>
+        <div class="summary-prompt-group">
+          <label class="summary-prompt-label">✏️ Custom Summary Prompt <span style="font-weight:400; color: #94a3b8;">(optional — overrides default)</span></label>
+          <textarea
+            class="cat-summary-prompt"
+            data-cat-id="${category.id}"
+            rows="3"
+            placeholder="E.g. Summarise these tweets focusing on product announcements and ignore any promotional content…">${category.summaryPrompt || ''}</textarea>
+        </div>
       </div>
     `;
+
 
     categoriesContainer.appendChild(categoryEl);
   });
@@ -199,8 +222,13 @@ function attachEventListeners() {
   // Toggle Category Collapse
   document.querySelectorAll('.category-header').forEach(header => {
     header.addEventListener('click', (e) => {
-      // Don't toggle if clicking the delete button, run button, or active toggle
-      if (e.target.classList.contains('btn-delete-cat') || e.target.classList.contains('btn-run-cat') || e.target.closest('.cat-active-toggle')) return;
+      // Don't toggle if clicking the delete button, run button, active toggle, or badge area
+      if (
+        e.target.classList.contains('btn-delete-cat') ||
+        e.target.classList.contains('btn-run-cat') ||
+        e.target.closest('.cat-badges') ||
+        e.target.closest('.cat-actions')
+      ) return;
 
       const card = e.target.closest('.category-card');
       const isNowCollapsed = card.classList.toggle('collapsed');
@@ -228,7 +256,7 @@ function attachEventListeners() {
       e.stopPropagation(); // Don't trigger collapse
       const catId = e.target.getAttribute('data-id');
       const categoryIndex = state.categories.findIndex(c => c.id === catId);
-      
+
       const originalText = e.target.innerHTML;
       e.target.innerHTML = '⏳...';
       e.target.disabled = true;
@@ -256,7 +284,7 @@ function attachEventListeners() {
   // Toggle Category Active Status
   document.querySelectorAll('.cat-active-toggle').forEach(checkbox => {
     checkbox.addEventListener('click', (e) => {
-      e.stopPropagation(); // Don't trigger collapse when clicking the checkbox
+      e.stopPropagation();
     });
     checkbox.addEventListener('change', (e) => {
       const catId = e.target.getAttribute('data-cat-id');
@@ -264,6 +292,9 @@ function attachEventListeners() {
       if (category) {
         category.isActive = e.target.checked;
         saveState();
+        // Keep badge style in sync
+        const badge = e.target.closest('.cat-badge-active');
+        if (badge) badge.classList.toggle('is-on', e.target.checked);
       }
     });
   });
@@ -350,6 +381,24 @@ function attachEventListeners() {
     });
   });
 
+  // Toggle Category Summarise
+  document.querySelectorAll('.cat-summarise-toggle').forEach(checkbox => {
+    checkbox.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
+    checkbox.addEventListener('change', (e) => {
+      const catId = e.target.getAttribute('data-cat-id');
+      const category = state.categories.find(c => c.id === catId);
+      if (category) {
+        category.enableCategorySummary = e.target.checked;
+        saveState();
+        // Toggle the is-on CSS class on the parent badge label
+        const badge = e.target.closest('.cat-badge-summarise');
+        if (badge) badge.classList.toggle('is-on', e.target.checked);
+      }
+    });
+  });
+
   // Toggle Extra Emails Enabled Status
   document.querySelectorAll('.cat-extra-emails-toggle').forEach(checkbox => {
     checkbox.addEventListener('change', (e) => {
@@ -369,6 +418,18 @@ function attachEventListeners() {
       const category = state.categories.find(c => c.id === catId);
       if (category) {
         category.extraEmails = e.target.value.trim();
+        saveState();
+      }
+    });
+  });
+
+  // Save custom summary prompt for a category on blur
+  document.querySelectorAll('.cat-summary-prompt').forEach(textarea => {
+    textarea.addEventListener('blur', (e) => {
+      const catId = e.target.getAttribute('data-cat-id');
+      const category = state.categories.find(c => c.id === catId);
+      if (category) {
+        category.summaryPrompt = e.target.value.trim();
         saveState();
       }
     });
@@ -425,6 +486,7 @@ addCategoryBtn.addEventListener('click', () => {
       id: 'cat_' + Date.now(),
       name: name,
       isActive: true, // Default new categories to active
+      enableCategorySummary: false,
       profiles: []
     });
     newCategoryInput.value = '';
@@ -434,6 +496,7 @@ addCategoryBtn.addEventListener('click', () => {
 
 // Save Settings (no longer triggers scraping)
 saveSettingsBtn.addEventListener('click', () => {
+  state.settings.geminiApiKey = document.getElementById('gemini-api-key').value.trim();
   state.settings.llmApiKey = document.getElementById('llm-api-key').value.trim();
   state.settings.emailApiKey = document.getElementById('email-api-key').value.trim();
   state.settings.recipientEmail = document.getElementById('recipient-email').value.trim();
