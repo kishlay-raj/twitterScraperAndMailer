@@ -141,6 +141,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
         scheduleCategoryScrapes();
     } else if (alarm.name === "dailyUnblockAlarm") {
         handleDailyUnblock();
+    } else if (alarm.name.startsWith("scrapeCategory_CONT_")) {
+        // Continuation alarm — resumes a split category scrape
+        const categoryIndex = parseInt(alarm.name.split("_")[2]);
+        console.log(`Continuation Alarm triggered for category index ${categoryIndex}!`);
+        scrapeAndDispatchContinuation(categoryIndex);
     } else if (alarm.name.startsWith("scrapeCategory_")) {
         const categoryIndex = parseInt(alarm.name.split("_")[1]);
         console.log(`Category Alarm triggered for index ${categoryIndex}!`);
@@ -276,6 +281,205 @@ async function startSingleCategoryScrape(categoryIndex) {
 }
 
 // ============================================================
+// SPLIT HELPER: Persists remaining profiles and schedules a
+// continuation alarm to fire after the last queued task.
+// ============================================================
+async function scheduleContinuation(categoryIndex, categoryName, remainingProfiles, nextPart) {
+    // Persist what still needs to be scraped
+    await chrome.storage.local.set({
+        [`continuation_${categoryIndex}`]: {
+            remainingProfiles,          // array of profile objects
+            nextPart                     // e.g. 2 for "Part 2"
+        }
+    });
+
+    // Find the latest scheduled alarm (regular or continuation) and queue after it
+    const allAlarms = await chrome.alarms.getAll();
+    const pendingAlarms = allAlarms
+        .filter(a => a.name.startsWith("scrapeCategory_"))
+        .sort((a, b) => (a.scheduledTime || 0) - (b.scheduledTime || 0));
+
+    const lastAlarm = pendingAlarms[pendingAlarms.length - 1];
+    
+    // 5 minutes buffer after the latest scheduled alarm (or from now)
+    const MIN_CONTINUATION_DELAY_MS = 5 * 60 * 1000;
+    const fireAt = lastAlarm
+        ? Math.max(lastAlarm.scheduledTime + MIN_CONTINUATION_DELAY_MS, Date.now() + MIN_CONTINUATION_DELAY_MS)
+        : Date.now() + MIN_CONTINUATION_DELAY_MS;
+
+    chrome.alarms.create(`scrapeCategory_CONT_${categoryIndex}`, { when: fireAt });
+    addLog(`[${categoryName}] ⏳ Continuation (Part ${nextPart}) queued at ` +
+        `${new Date(fireAt).toLocaleTimeString()} — ${remainingProfiles.length} profile(s) remaining.`);
+}
+
+// ============================================================
+// CONTINUATION WORKER: Resumes a split category scrape from
+// where it left off (stored in chrome.storage.local).
+// ============================================================
+async function scrapeAndDispatchContinuation(categoryIndex) {
+    const { categories, processedTweetIds, settings } = await chrome.storage.local.get(
+        ['categories', 'processedTweetIds', 'settings']
+    );
+    if (!categories || categoryIndex >= categories.length) return;
+
+    const category = categories[categoryIndex];
+    const contKey = `continuation_${categoryIndex}`;
+    const { [contKey]: contState } = await chrome.storage.local.get([contKey]);
+
+    if (!contState || !contState.remainingProfiles || contState.remainingProfiles.length === 0) {
+        addLog(`[${category.name}] No continuation state found — skipping.`);
+        return;
+    }
+
+    const { remainingProfiles, nextPart } = contState;
+    addLog(`[${category.name}] 🔁 Continuation starting (Part ${nextPart}, ${remainingProfiles.length} profile(s)).`);
+
+    // Clear continuation state now — if it splits again, scheduleContinuation will re-write
+    await chrome.storage.local.remove([contKey]);
+
+    const state = await chrome.storage.local.get(['activeScrapingTasks']);
+    let currentTasks = (state.activeScrapingTasks || 0) + 1;
+    await chrome.storage.local.set({ activeScrapingTasks: currentTasks });
+
+    try {
+        let globalProcessedIds = processedTweetIds || [];
+        let allowDuplicates = settings?.allowDuplicates || false;
+        let newIdsThisRun = new Set(); 
+
+        const compilationPayload = {
+            [category.name]: {
+                extraEmails: category.enableExtraEmails !== false ? (category.extraEmails || '') : '',
+                enableCategorySummary: category.enableCategorySummary === true,
+                enableFactCheck: category.enableFactCheck !== false,
+                enableGlossary: category.enableGlossary !== false,
+                summaryPrompt: category.summaryPrompt || '',
+                partLabel: `Part ${nextPart}`,
+                profiles: []
+            }
+        };
+
+        const categoryStartTime = Date.now();
+        const SPLIT_TIMEOUT_MS = 4 * 60 * 1000;
+        let splitTriggered = false;
+        const activeRemainingProfiles = remainingProfiles.filter(p => p.isActive !== false);
+
+        for (let pi = 0; pi < activeRemainingProfiles.length; pi++) {
+            const profile = activeRemainingProfiles[pi];
+
+            // Check if we've hit the 4-minute limit again
+            if (compilationPayload[category.name].profiles.length > 0 &&
+                (Date.now() - categoryStartTime) > SPLIT_TIMEOUT_MS) {
+
+                const stillRemaining = activeRemainingProfiles.slice(pi);
+                addLog(`[${category.name}] ⏱ 4-min limit hit again in Part ${nextPart}. ` +
+                    `Dispatching Part ${nextPart} and queuing Part ${nextPart + 1} ` +
+                    `(${stillRemaining.length} profile(s) remaining).`);
+
+                // Await dispatch so active task increment holds until we're actually done with this context
+                try {
+                    await processAndDispatch(compilationPayload);
+                } catch (e) {
+                    addLog(`[${category.name}] Part ${nextPart} dispatch error: ${e.message}`, 'error');
+                }
+                
+                // Save IDs before queuing continuation so they are visible to the next run
+                if (newIdsThisRun.size > 0) {
+                    const { processedTweetIds: latestIds } = await chrome.storage.local.get(['processedTweetIds']);
+                    let combinedIds = [...(latestIds || []), ...newIdsThisRun];
+                    if (combinedIds.length > 5000) combinedIds = combinedIds.slice(-5000);
+                    await chrome.storage.local.set({ processedTweetIds: combinedIds });
+                }
+
+                await scheduleContinuation(categoryIndex, category.name, stillRemaining, nextPart + 1);
+                splitTriggered = true;
+                break;
+            }
+
+            // No manual isActive check needed here because we filtered upfront
+
+            try {
+                let targetUrl = profile.url;
+                if (profile.scrapeReplies) {
+                    try {
+                        const parsedUrl = new URL(targetUrl);
+                        parsedUrl.pathname = parsedUrl.pathname.replace(/\/+$/, '') + '/with_replies';
+                        targetUrl = parsedUrl.toString();
+                    } catch (e) { targetUrl = targetUrl.replace(/\/+$/, '') + '/with_replies'; }
+                }
+
+                const globalProcessedIdsToPass = allowDuplicates ? [] : globalProcessedIds;
+                const scrapeResult = await scrapeProfile(targetUrl, globalProcessedIdsToPass, settings);
+                const rawTweets = scrapeResult.tweets || [];
+
+                let novelTweets = [];
+                for (const t of rawTweets) {
+                    if (allowDuplicates || !globalProcessedIds.includes(t.id)) novelTweets.push(t);
+                    if (!globalProcessedIds.includes(t.id)) newIdsThisRun.add(t.id);
+                }
+                if (profile.scrapeRetweets === false) novelTweets = novelTweets.filter(t => !t.isRetweet);
+
+                compilationPayload[category.name].profiles.push({
+                    url: profile.url,
+                    profileMeta: scrapeResult.profileMeta || {},
+                    enableAiSummary: profile.enableAiSummary,
+                    scrapeRetweets: profile.scrapeRetweets !== false,
+                    tweets: novelTweets
+                });
+
+                await new Promise(r => setTimeout(r, 500));
+            } catch (err) {
+                compilationPayload[category.name].profiles.push({
+                    url: profile.url, profileMeta: {},
+                    enableAiSummary: profile.enableAiSummary,
+                    tweets: [], error: err.message || 'Error during scraping'
+                });
+            }
+        }
+
+        if (!splitTriggered) {
+            // All remaining profiles done — dispatch final part
+            compilationPayload[category.name].partLabel = `Part ${nextPart} — Final`;
+            addLog(`[${category.name}] ✅ Continuation complete. Dispatching Part ${nextPart} (Final).`);
+            try {
+                await processAndDispatch(compilationPayload);
+            } catch (dispatchErr) {
+                addLog(`[${category.name}] Continuation dispatch error: ${dispatchErr.message}`, 'error');
+            }
+
+            // Save IDs
+            if (newIdsThisRun.size > 0) {
+                const { processedTweetIds: latestIds } = await chrome.storage.local.get(['processedTweetIds']);
+                let combinedIds = [...(latestIds || []), ...newIdsThisRun];
+                if (combinedIds.length > 5000) combinedIds = combinedIds.slice(combinedIds.length - 5000);
+                await chrome.storage.local.set({ processedTweetIds: combinedIds });
+            }
+        }
+
+    } finally {
+        const finalState = await chrome.storage.local.get(['activeScrapingTasks']);
+        let remaining = Math.max((finalState.activeScrapingTasks || 1) - 1, 0);
+        await chrome.storage.local.set({ activeScrapingTasks: remaining });
+
+        const allAlarms = await chrome.alarms.getAll();
+        const activeCategoryAlarms = allAlarms.filter(a => a.name.startsWith("scrapeCategory_"));
+        
+        if (remaining === 0 && activeCategoryAlarms.length === 0) {
+            // Guard: don't re-block if there's any pending continuation state saved
+            const allStorage = await chrome.storage.local.get(null);
+            const hasPendingContinuation = Object.keys(allStorage).some(k => k.startsWith('continuation_'));
+            
+            if (!hasPendingContinuation) {
+                const { twitterWasBlockedTemporarily } = await chrome.storage.local.get(['twitterWasBlockedTemporarily']);
+                if (twitterWasBlockedTemporarily) {
+                    addLog("All continuations finished. Re-blocking Twitter.");
+                    await updateTwitterBlock(true);
+                }
+            }
+        }
+    }
+}
+
+// ============================================================
 // WORKER: Scrapes all profiles in ONE category and dispatches
 // the email. This is a completely self-contained unit of work.
 // ============================================================
@@ -302,13 +506,56 @@ async function scrapeAndDispatchCategory(categoryIndex) {
             [category.name]: {
                 extraEmails: category.enableExtraEmails !== false ? (category.extraEmails || '') : '',
                 enableCategorySummary: category.enableCategorySummary === true,
+                enableFactCheck: category.enableFactCheck !== false,
+                enableGlossary: category.enableGlossary !== false,
                 summaryPrompt: category.summaryPrompt || '',
                 profiles: []
             }
         };
 
-        for (const profile of (category.profiles || [])) {
-            if (profile.isActive === false) continue;
+        // ── 4-minute split timer ───────────────────────────────────────────────
+        const categoryStartTime = Date.now();
+        const SPLIT_TIMEOUT_MS = 4 * 60 * 1000; // 4 minutes
+        let splitTriggered = false;
+        const allProfiles = (category.profiles || []).filter(p => p.isActive !== false);
+
+        for (let pi = 0; pi < allProfiles.length; pi++) {
+            const profile = allProfiles[pi];
+
+            // Before scraping each profile, check elapsed time.
+            // Only split if we've already scraped at least 1 profile so the
+            // Part 1 email is never empty.
+            if (compilationPayload[category.name].profiles.length > 0 &&
+                (Date.now() - categoryStartTime) > SPLIT_TIMEOUT_MS) {
+
+                const remainingProfiles = allProfiles.slice(pi); // profiles not yet scraped
+                addLog(`[${category.name}] ⏱ 4-min scrape limit reached after ` +
+                    `${compilationPayload[category.name].profiles.length} profile(s). ` +
+                    `Dispatching Part 1, queuing Part 2 (${remainingProfiles.length} profile(s) remaining).`);
+
+                // Tag the payload as Part 1 before dispatching
+                compilationPayload[category.name].partLabel = 'Part 1';
+
+                // Await dispatch so active task increment holds until we're actually done with this context
+                try {
+                    await processAndDispatch(compilationPayload);
+                } catch (e) {
+                    addLog(`[${category.name}] Part 1 dispatch error: ${e.message}`, 'error');
+                }
+
+                // Save IDs before queuing continuation so they are visible to the next run
+                if (newIdsThisCategory.size > 0) {
+                    const { processedTweetIds: latestIds } = await chrome.storage.local.get(['processedTweetIds']);
+                    let combinedIds = [...(latestIds || []), ...newIdsThisCategory];
+                    if (combinedIds.length > 5000) combinedIds = combinedIds.slice(-5000);
+                    await chrome.storage.local.set({ processedTweetIds: combinedIds });
+                }
+
+                // Persist remaining profiles and schedule continuation
+                await scheduleContinuation(categoryIndex, category.name, remainingProfiles, 2);
+                splitTriggered = true;
+                break; // exit the profile loop — continuation handles the rest
+            }
 
             try {
                 let targetUrl = profile.url;
@@ -365,16 +612,18 @@ async function scrapeAndDispatchCategory(categoryIndex) {
             }
         }
 
-        // Dispatch email for this category
-        console.log(`Finished scraping [${category.name}]. Dispatching email...`);
-        try {
-            await processAndDispatch(compilationPayload);
-        } catch (dispatchErr) {
-            console.error(`CRITICAL: processAndDispatch failed for ${category.name}:`, dispatchErr);
+        // Only dispatch if we didn't split — split path dispatches Part 1 itself
+        if (!splitTriggered) {
+            console.log(`Finished scraping [${category.name}]. Dispatching email...`);
+            try {
+                await processAndDispatch(compilationPayload);
+            } catch (dispatchErr) {
+                console.error(`CRITICAL: processAndDispatch failed for ${category.name}:`, dispatchErr);
+            }
         }
 
-        // Save new IDs
-        if (newIdsThisCategory.size > 0) {
+        // Save new IDs (only the ones scraped in this part — continuation saves its own)
+        if (!splitTriggered && newIdsThisCategory.size > 0) {
             // Re-read to avoid overwriting IDs saved by a concurrently running category
             const { processedTweetIds: latestIds } = await chrome.storage.local.get(['processedTweetIds']);
             let combinedIds = [...(latestIds || []), ...newIdsThisCategory];
@@ -383,7 +632,7 @@ async function scrapeAndDispatchCategory(categoryIndex) {
             console.log(`Saved ${newIdsThisCategory.size} new tweet IDs for [${category.name}].`);
         }
 
-        console.log(`=== END scrapeAndDispatchCategory: [${category.name}] ===`);
+        console.log(`=== END scrapeAndDispatchCategory: [${category.name}] (splitTriggered=${splitTriggered}) ===`);
 
     } finally {
         // Decrement active scraping tasks count
@@ -396,10 +645,16 @@ async function scrapeAndDispatchCategory(categoryIndex) {
         const activeCategoryAlarms = allAlarms.filter(a => a.name.startsWith("scrapeCategory_"));
 
         if (remainingTasks === 0 && activeCategoryAlarms.length === 0) {
-            const { twitterWasBlockedTemporarily } = await chrome.storage.local.get(['twitterWasBlockedTemporarily']);
-            if (twitterWasBlockedTemporarily) {
-                addLog("All categories finished scraping. Re-blocking Twitter as per user setting.");
-                await updateTwitterBlock(true); // Re-block
+            // Guard: don't re-block if there's any pending continuation state saved
+            const allStorage = await chrome.storage.local.get(null);
+            const hasPendingContinuation = Object.keys(allStorage).some(k => k.startsWith('continuation_'));
+
+            if (!hasPendingContinuation) {
+                const { twitterWasBlockedTemporarily } = await chrome.storage.local.get(['twitterWasBlockedTemporarily']);
+                if (twitterWasBlockedTemporarily) {
+                    addLog("All categories finished scraping. Re-blocking Twitter as per user setting.");
+                    await updateTwitterBlock(true); // Re-block
+                }
             }
         }
     }
@@ -548,7 +803,7 @@ async function processAndDispatch(payload) {
     }
 
     for (const [categoryName, categoryData] of Object.entries(payload)) {
-        const { extraEmails, profiles, enableCategorySummary, summaryPrompt } = categoryData;
+        const { extraEmails, profiles, enableCategorySummary, enableFactCheck, enableGlossary, summaryPrompt, partLabel: incomingPartLabel } = categoryData;
 
         // Sort: profiles with tweets first, "no new updates" profiles last
         const sortedProfiles = [...profiles].sort((a, b) => {
@@ -641,7 +896,13 @@ async function processAndDispatch(payload) {
             }
 
             if (profile.enableAiSummary) {
-                const summary = await summarizeTweets(profile.tweets, geminiApiKey, llmApiKey, summaryPrompt);
+                let summary = '';
+                try {
+                    summary = await summarizeTweets(profile.tweets, geminiApiKey, llmApiKey, summaryPrompt);
+                } catch (summaryErr) {
+                    summary = `<em style="color:#dc2626;">⚠️ AI Summary generation failed: ${summaryErr.message}</em>`;
+                }
+
                 profileHtml += `
           <tr>
             <td style="padding:12px 28px 4px 28px;">
@@ -795,10 +1056,12 @@ async function processAndDispatch(payload) {
                 addLog(`[${categoryName}] Calling LLM... (Gemini: ${hasGeminiKey ? '✅ key set' : '❌ not set'}, HuggingFace fallback: ${hasHFKey ? '✅ key set' : '❌ not set'})`);
 
                 let categorySummaryText = null;
+                let categorySummaryError = null;
                 try {
-                    categorySummaryText = await summarizeTweets(tweetsForSummary, geminiApiKey, llmApiKey, summaryPrompt);
+                    categorySummaryText = await summarizeTweets(tweetsForSummary, geminiApiKey, llmApiKey, summaryPrompt, enableFactCheck, enableGlossary);
                     addLog(`[${categoryName}] LLM responded. Summary length: ${categorySummaryText?.length ?? 0} chars.`);
                 } catch (summaryErr) {
+                    categorySummaryError = summaryErr.message;
                     addLog(`[${categoryName}] ⚠️ Summary error: ${summaryErr.message}. Email will be sent without summary.`);
                 }
 
@@ -849,6 +1112,33 @@ async function processAndDispatch(payload) {
                     addLog(`[${categoryName}] ✅ Category summary generated (${tweetsForSummary.length} tweets summarised).`);
                 } else {
                     addLog(`[${categoryName}] ⚠️ Summary returned empty — email will be sent without summary block.`);
+                    // Inject failure notice into the email so the recipient knows why there's no summary
+                    const failureReason = categorySummaryError || 'Summary returned empty (no content from LLM).';
+                    // Simplify the error for display: extract just the first sentence / key part
+                    const displayReason = failureReason.length > 300 ? failureReason.slice(0, 300) + '…' : failureReason;
+                    categorySummaryBlocks.push(`
+          <!-- ── SUMMARY FAILURE NOTICE ── -->
+          <tr>
+            <td style="padding:20px 28px 12px 28px;">
+              <div style="background:#fff7ed; border:1.5px solid #fb923c;
+                          border-radius:10px; padding:14px 18px;">
+                <div style="font-size:12px; font-weight:800; color:#c2410c;
+                            text-transform:uppercase; letter-spacing:0.5px;
+                            margin-bottom:8px;">⚠️ AI Summary Unavailable</div>
+                <div style="font-size:13px; color:#7c2d12; line-height:1.65;">
+                  The AI summary could not be generated for this digest. The email below contains all the raw tweets.
+                </div>
+                <div style="margin-top:10px; padding:10px 12px;
+                            background:#fff; border:1px solid #fed7aa;
+                            border-radius:6px; font-size:11.5px;
+                            color:#9a3412; font-family:monospace;
+                            word-break:break-word; line-height:1.6;">
+                  <strong>Reason:</strong> ${displayReason}
+                </div>
+              </div>
+            </td>
+          </tr>
+                    `);
                 }
             } else {
                 addLog(`[${categoryName}] Category summary skipped — no tweets found across any profile.`);
@@ -952,7 +1242,12 @@ async function processAndDispatch(payload) {
         }
 
         for (let ci = 0; ci < emailChunks.length; ci++) {
-            const partLabel = emailChunks.length > 1 ? `Part ${ci + 1} of ${emailChunks.length}` : '';
+            // incomingPartLabel: set by continuation payloads ("Part 2 — Final", etc.)
+            // chunkLabel: set when a single email is too large and needs splitting across multiple emails
+            const chunkLabel = emailChunks.length > 1 ? `Email ${ci + 1}/${emailChunks.length}` : '';
+            const partLabel = incomingPartLabel && chunkLabel
+                ? `${incomingPartLabel}, ${chunkLabel}`
+                : incomingPartLabel || chunkLabel;
             const summaryPrefix = (enableCategorySummary && categorySummaryBlocks.length > 0) ? '✨ ' : '';
             const emailSubject = `${summaryPrefix}Curation: ${categoryName}${partLabel ? ` (${partLabel})` : ''}`;
             const emailHtml = buildEmailShell(categoryName, partLabel, emailChunks[ci]);

@@ -201,6 +201,16 @@ function renderState() {
           />
         </div>
         <div class="summary-prompt-group">
+          <div style="margin-bottom: 12px; display: flex; gap: 16px; flex-wrap: wrap;">
+            <label style="font-size: 13px; display: flex; align-items: center; gap: 6px; cursor: pointer; color: #475569;">
+              <input type="checkbox" class="cat-factcheck-toggle" data-cat-id="${category.id}" ${category.enableFactCheck !== false ? 'checked' : ''}>
+              🚨 Include Fact-Check
+            </label>
+            <label style="font-size: 13px; display: flex; align-items: center; gap: 6px; cursor: pointer; color: #475569;">
+              <input type="checkbox" class="cat-glossary-toggle" data-cat-id="${category.id}" ${category.enableGlossary !== false ? 'checked' : ''}>
+              📖 Include Glossary
+            </label>
+          </div>
           <label class="summary-prompt-label">✏️ Custom Summary Prompt <span style="font-weight:400; color: #94a3b8;">(optional — overrides default)</span></label>
           <textarea
             class="cat-summary-prompt"
@@ -395,6 +405,30 @@ function attachEventListeners() {
         // Toggle the is-on CSS class on the parent badge label
         const badge = e.target.closest('.cat-badge-summarise');
         if (badge) badge.classList.toggle('is-on', e.target.checked);
+      }
+    });
+  });
+
+  // Toggle Category Fact-Check
+  document.querySelectorAll('.cat-factcheck-toggle').forEach(checkbox => {
+    checkbox.addEventListener('change', (e) => {
+      const catId = e.target.getAttribute('data-cat-id');
+      const category = state.categories.find(c => c.id === catId);
+      if (category) {
+        category.enableFactCheck = e.target.checked;
+        saveState();
+      }
+    });
+  });
+
+  // Toggle Category Glossary
+  document.querySelectorAll('.cat-glossary-toggle').forEach(checkbox => {
+    checkbox.addEventListener('change', (e) => {
+      const catId = e.target.getAttribute('data-cat-id');
+      const category = state.categories.find(c => c.id === catId);
+      if (category) {
+        category.enableGlossary = e.target.checked;
+        saveState();
       }
     });
   });

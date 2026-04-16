@@ -5,13 +5,19 @@
  */
 
 const GEMINI_TIMEOUT_MS = 30_000;
-const HF_TIMEOUT_MS     = 45_000;
+const HF_TIMEOUT_MS = 45_000;
 
+/**
+ * Wraps fetch() in a Promise.race timeout.
+ * AbortController is unreliable in Chrome MV3 service workers — the abort
+ * signal sometimes isn't propagated, leaving fetch() hanging until Chrome
+ * kills the entire service worker. Promise.race is pure JS and always fires.
+ */
 function fetchWithTimeout(url, options, ms) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), ms);
-    return fetch(url, { ...options, signal: controller.signal })
-        .finally(() => clearTimeout(timer));
+    const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`TIMEOUT_${ms}`)), ms)
+    );
+    return Promise.race([fetch(url, options), timeoutPromise]);
 }
 
 // ── Section style map ─────────────────────────────────────────────────────────
@@ -150,7 +156,7 @@ function markdownToEmailHtml(text) {
  * @param {string} [customPrompt] - Optional instruction — replaces the default prompt entirely.
  * @returns {Promise<string>} Summary HTML with model attribution.
  */
-async function summarizeTweets(tweets, geminiApiKeys, hfApiKey, customPrompt) {
+async function summarizeTweets(tweets, geminiApiKeys, hfApiKey, customPrompt, enableFactCheck = true, enableGlossary = true) {
     if (!tweets || tweets.length === 0) return "No updates in the last 24 hours.";
 
     const textPayload = tweets.map((t, idx) => {
@@ -160,26 +166,23 @@ async function summarizeTweets(tweets, geminiApiKeys, hfApiKey, customPrompt) {
         return `Tweet ${idx + 1}:${subInfo}\nDate: ${dateStr}${retweetInfo}\nText: ${t.text}\nQuoted: ${t.quotedText || ''}\nURL: ${t.url}`;
     }).join("\n\n");
 
-    const defaultInstruction = `You are an expert analyst. Summarize the following tweets into a concise, scannable digest.
+    let sectionsInstruction = ``;
+    if (enableFactCheck) {
+        sectionsInstruction += `\n\n## 🚨 Fact-Check & Misinformation Report\nCheck for false, misleading, or unverified claims. For each issue found, write three lines:\n- **Claim:** [the specific claim]\n- **Issue:** [why it is misleading or wrong]\n- **Fact:** [the verified reality]\nIf nothing problematic is found, write: No obvious misinformation detected.`;
+    }
 
-Start with a single bold sentence giving the big-picture overview.
-Then write exactly these three sections using these headers:
+    if (enableGlossary) {
+        sectionsInstruction += `\n\n## 📖 Glossary of Terms\nList any jargon, acronyms, or niche terms using "- **Term:** definition" format.\nIf no complex terms appear, write: No lesser-known terms detected.`;
+    }
 
-## 📝 Minimal Summary
-Synthesize the tweets into 4–6 concise bullet points (use "- " prefix). Be factual and direct. No fluff.
+    const defaultInstruction = `You are an expert analyst. Summarize the following tweets into a concise, scannable digest.\n\nStart with a single bold sentence giving the big-picture overview.\nThen write exactly these sections using these headers:\n\n## 📝 Minimal Summary\nSynthesize the tweets into 4–6 concise bullet points (use "- " prefix). Be factual and direct. No fluff.${sectionsInstruction}`;
 
-## 🚨 Fact-Check & Misinformation Report
-Check for false, misleading, or unverified claims. For each issue found, write three lines:
-- **Claim:** [the specific claim]
-- **Issue:** [why it is misleading or wrong]
-- **Fact:** [the verified reality]
-If nothing problematic is found, write: No obvious misinformation detected.
+    let instruction = (customPrompt && customPrompt.trim()) ? customPrompt.trim() : defaultInstruction;
 
-## 📖 Glossary of Terms
-List any jargon, acronyms, or niche terms using "- **Term:** definition" format.
-If no complex terms appear, write: No lesser-known terms detected.`;
+    if (customPrompt && customPrompt.trim()) {
+        instruction += sectionsInstruction;
+    }
 
-    const instruction = (customPrompt && customPrompt.trim()) ? customPrompt.trim() : defaultInstruction;
     const prompt = `${instruction}\n\nTweets:\n${textPayload}`;
 
     // ── Primary: Gemini ────────────────────────────────────────────────────────
@@ -191,13 +194,15 @@ If no complex terms appear, write: No lesser-known terms detected.`;
         console.warn("[LLM] No Gemini keys configured. Trying HuggingFace fallback.");
     }
 
+    const geminiErrors = [];
+
     for (let i = 0; i < geminiKeyList.length; i++) {
         const key = geminiKeyList[i];
         const keyLabel = geminiKeyList.length > 1 ? ` (key ${i + 1}/${geminiKeyList.length})` : '';
         try {
             console.log(`[LLM] Trying Gemini${keyLabel}...`);
             const res = await fetchWithTimeout(
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${key}`,
                 {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -223,8 +228,11 @@ If no complex terms appear, write: No lesser-known terms detected.`;
             return markdownToEmailHtml(raw.trim()) + attribution;
 
         } catch (err) {
-            const reason = err.name === 'AbortError' ? `timed out after ${GEMINI_TIMEOUT_MS / 1000}s` : err.message;
-            console.warn(`[LLM] Gemini key ${i + 1} failed: ${reason}`);
+            const isTimeout = err.message && err.message.startsWith('TIMEOUT_');
+            const reason = isTimeout ? `timed out after ${GEMINI_TIMEOUT_MS / 1000}s` : err.message;
+            const shortReason = reason.length > 150 ? reason.slice(0, 150) + '...' : reason;
+            console.warn(`[LLM] Gemini key ${i + 1} failed: ${shortReason}`);
+            geminiErrors.push(`Key ${i + 1}: ${shortReason}`);
         }
     }
 
@@ -234,9 +242,14 @@ If no complex terms appear, write: No lesser-known terms detected.`;
 
     // ── Fallback: Hugging Face ─────────────────────────────────────────────────
     if (!hfApiKey) {
-        const msg = "No AI API keys configured. Please add a Gemini or Hugging Face key in Settings.";
+        let msg = "No AI API keys configured.";
+        if (geminiErrors.length > 0) {
+            msg = `All Gemini keys failed: ${geminiErrors.join(' | ')}. No HuggingFace fallback key set.`;
+        } else if (geminiKeyList.length > 0) {
+            msg = `No valid Gemini key provided. No HuggingFace fallback key set.`;
+        }
         console.error("[LLM] " + msg);
-        return `<em style="color:#dc2626;">⚠️ ${msg}</em>`;
+        throw new Error(msg);
     }
 
     try {
@@ -266,9 +279,16 @@ If no complex terms appear, write: No lesser-known terms detected.`;
         return markdownToEmailHtml(raw.trim()) + attribution;
 
     } catch (err) {
-        const reason = err.name === 'AbortError' ? `timed out after ${HF_TIMEOUT_MS / 1000}s` : err.message;
-        console.error("[LLM] HuggingFace failed:", reason);
-        return `<em style="color:#dc2626;">⚠️ Summary error: ${reason}</em>`;
+        const isTimeout = err.message && err.message.startsWith('TIMEOUT_');
+        const reason = isTimeout ? `timed out after ${HF_TIMEOUT_MS / 1000}s` : err.message;
+        const shortReason = reason.length > 150 ? reason.slice(0, 150) + '...' : reason;
+        console.error("[LLM] HuggingFace failed:", shortReason);
+
+        let finalErrorMsg = `HuggingFace failed (${shortReason}).`;
+        if (geminiErrors.length > 0) {
+            finalErrorMsg += ` Gemini also failed: ${geminiErrors.join(' | ')}`;
+        }
+        throw new Error(finalErrorMsg);
     }
 }
 
