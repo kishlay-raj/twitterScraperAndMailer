@@ -25,6 +25,11 @@ const importBtn = document.getElementById('import-btn');
 const importFile = document.getElementById('import-file');
 const logsContainer = document.getElementById('logs-container');
 const clearLogsBtn = document.getElementById('clear-logs-btn');
+const copyLogsBtn = document.getElementById('copy-logs-btn');
+const logsTimeFilter = document.getElementById('logs-time-filter');
+const logsCustomRange = document.getElementById('logs-custom-range');
+const logsRangeFrom = document.getElementById('logs-range-from');
+const logsRangeTo = document.getElementById('logs-range-to');
 const blockTwitterBtn = document.getElementById('block-twitter-btn');
 
 // Initialize
@@ -61,22 +66,82 @@ blockTwitterBtn.addEventListener('click', () => {
   });
 });
 
+function getFilteredLogs(logs) {
+  const filterVal = logsTimeFilter.value;
+  if (filterVal === 'all') return logs;
+
+  const now = Date.now();
+  if (filterVal === '1h')  return logs.filter(l => now - l.timestamp <= 60 * 60 * 1000);
+  if (filterVal === '6h')  return logs.filter(l => now - l.timestamp <= 6 * 60 * 60 * 1000);
+  if (filterVal === '24h') return logs.filter(l => now - l.timestamp <= 24 * 60 * 60 * 1000);
+
+  if (filterVal === 'custom') {
+    const from = logsRangeFrom.value ? new Date(logsRangeFrom.value).getTime() : 0;
+    const to   = logsRangeTo.value   ? new Date(logsRangeTo.value).getTime()   : now;
+    return logs.filter(l => l.timestamp >= from && l.timestamp <= to);
+  }
+  return logs;
+}
+
 async function renderLogs() {
   const { logs = [] } = await chrome.storage.local.get(['logs']);
+  const filtered = getFilteredLogs([...logs]).reverse();
 
-  if (logs.length === 0) {
-    logsContainer.innerHTML = '<div class="log-entry">No logs yet.</div>';
+  if (filtered.length === 0) {
+    logsContainer.innerHTML = '<div class="log-entry">No logs match the selected filter.</div>';
     return;
   }
 
-  logsContainer.innerHTML = logs.reverse().map(log => {
-    const time = new Date(log.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  logsContainer.innerHTML = filtered.map(log => {
+    const date = new Date(log.timestamp);
+    const timeStr = date.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
     return `<div class="log-entry">
-      <span class="log-timestamp">[${time}]</span>
+      <span class="log-timestamp">[${dateStr} ${timeStr}]</span>
       <span class="log-level-${log.level}">${log.message}</span>
     </div>`;
   }).join('');
 }
+
+// Time range filter interactions
+logsTimeFilter.addEventListener('change', () => {
+  logsCustomRange.style.display = logsTimeFilter.value === 'custom' ? 'flex' : 'none';
+  renderLogs();
+});
+
+logsRangeFrom.addEventListener('change', renderLogs);
+logsRangeTo.addEventListener('change', renderLogs);
+
+// Copy logs button
+copyLogsBtn.addEventListener('click', async () => {
+  const { logs = [] } = await chrome.storage.local.get(['logs']);
+  const filtered = getFilteredLogs([...logs]).reverse();
+
+  if (filtered.length === 0) {
+    copyLogsBtn.textContent = '⚠️ Empty';
+    setTimeout(() => { copyLogsBtn.innerHTML = '📋 Copy'; }, 1500);
+    return;
+  }
+
+  const text = filtered.map(log => {
+    const date = new Date(log.timestamp);
+    const timeStr = date.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    return `[${dateStr} ${timeStr}] [${(log.level || 'info').toUpperCase()}] ${log.message}`;
+  }).join('\n');
+
+  try {
+    await navigator.clipboard.writeText(text);
+    copyLogsBtn.textContent = '✅ Copied!';
+    copyLogsBtn.classList.add('copied');
+  } catch {
+    copyLogsBtn.textContent = '❌ Failed';
+  }
+  setTimeout(() => {
+    copyLogsBtn.innerHTML = '📋 Copy';
+    copyLogsBtn.classList.remove('copied');
+  }, 1800);
+});
 
 clearLogsBtn.addEventListener('click', async () => {
   await chrome.storage.local.set({ logs: [] });
@@ -169,10 +234,13 @@ function renderState() {
         </div>
         <!-- Row 2: pill badges -->
         <div class="cat-badges">
-          <label class="cat-badge cat-badge-summarise ${category.enableCategorySummary ? 'is-on' : ''}" title="AI summary of all tweets in this category">
-            <input type="checkbox" class="cat-summarise-toggle" data-cat-id="${category.id}" ${category.enableCategorySummary ? 'checked' : ''}>
-            ✨ Summarise
-          </label>
+          <button
+            class="cat-badge cat-badge-summarise cat-badge-mode-${category.categorySummaryMode || 'off'}"
+            data-cat-id="${category.id}"
+            data-mode="${category.categorySummaryMode || 'off'}"
+            title="Cycle summary mode: Off → Minimal → Normal"
+            onclick="event.stopPropagation()"
+          >${{ off: '✨ Summarise: Off', minimal: '✨ Minimal', normal: '📋 Normal' }[category.categorySummaryMode || 'off']}</button>
           <label class="cat-badge cat-badge-active ${category.isActive !== false ? 'is-on' : ''}">
             <input type="checkbox" class="cat-active-toggle" data-cat-id="${category.id}" ${category.isActive !== false ? 'checked' : ''}>
             Active
@@ -391,21 +459,27 @@ function attachEventListeners() {
     });
   });
 
-  // Toggle Category Summarise
-  document.querySelectorAll('.cat-summarise-toggle').forEach(checkbox => {
-    checkbox.addEventListener('click', (e) => {
+  // Cycle Category Summary Mode (Off → Minimal → Normal → Off)
+  const SUMMARY_MODES = ['off', 'minimal', 'normal'];
+  const SUMMARY_LABELS = { off: '✨ Summarise: Off', minimal: '✨ Minimal', normal: '📋 Normal' };
+  document.querySelectorAll('.cat-badge-summarise').forEach(btn => {
+    btn.addEventListener('click', (e) => {
       e.stopPropagation();
-    });
-    checkbox.addEventListener('change', (e) => {
-      const catId = e.target.getAttribute('data-cat-id');
+      const catId = btn.getAttribute('data-cat-id');
       const category = state.categories.find(c => c.id === catId);
-      if (category) {
-        category.enableCategorySummary = e.target.checked;
-        saveState();
-        // Toggle the is-on CSS class on the parent badge label
-        const badge = e.target.closest('.cat-badge-summarise');
-        if (badge) badge.classList.toggle('is-on', e.target.checked);
-      }
+      if (!category) return;
+      const currentMode = category.categorySummaryMode || 'off';
+      const nextMode = SUMMARY_MODES[(SUMMARY_MODES.indexOf(currentMode) + 1) % SUMMARY_MODES.length];
+      category.categorySummaryMode = nextMode;
+      // Keep legacy boolean in sync for backward compat
+      category.enableCategorySummary = (nextMode !== 'off');
+      saveState();
+      // Update button label + CSS mode class
+      btn.textContent = SUMMARY_LABELS[nextMode];
+      btn.setAttribute('data-mode', nextMode);
+      SUMMARY_MODES.forEach(m => btn.classList.remove(`cat-badge-mode-${m}`));
+      btn.classList.add(`cat-badge-mode-${nextMode}`);
+      btn.classList.toggle('is-on', nextMode !== 'off');
     });
   });
 

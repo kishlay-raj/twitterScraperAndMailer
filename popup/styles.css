@@ -295,6 +295,15 @@ button { font-family: inherit; cursor: pointer; transition: all var(--transition
 .cat-badge-active:hover { border-color: var(--success); color: var(--success-dark); background: var(--success-light); }
 .cat-badge-active.is-on { color: var(--success-dark); border-color: var(--success); background: var(--success-light); }
 
+/* Summary mode button states */
+.cat-badge-summarise { background: #fff; border-color: var(--gray-200); color: var(--gray-500); }
+.cat-badge-summarise:hover { border-color: var(--gray-300); background: var(--gray-100); }
+/* Minimal — purple */
+.cat-badge-summarise.cat-badge-mode-minimal,
+.cat-badge-summarise.is-on { color: var(--purple); border-color: var(--purple); background: var(--purple-light); }
+/* Normal — indigo/blue */
+.cat-badge-summarise.cat-badge-mode-normal { color: #4f46e5; border-color: #6366f1; background: #eef2ff; }
+
 /* ── Small Run button (header) ───────────────────────────────── */
 .btn-run-cat {
   background: var(--success);
@@ -560,3 +569,72 @@ button { font-family: inherit; cursor: pointer; transition: all var(--transition
 .log-timestamp { color: #94a3b8; margin-right: 5px; }
 .log-level-info { color: #38bdf8; }
 .log-level-error { color: #f87171; }
+
+/* ── Logs filter row ─────────────────────────────────────────── */
+.logs-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 7px;
+  flex-wrap: wrap;
+}
+
+.logs-filter-label {
+  font-size: 0.68rem;
+  color: var(--gray-500);
+  font-weight: 500;
+  white-space: nowrap;
+  margin-bottom: 0;
+}
+
+.logs-time-filter {
+  font-size: 0.68rem;
+  padding: 3px 6px;
+  border: 1px solid var(--gray-300);
+  border-radius: 5px;
+  background: var(--gray-50);
+  color: var(--gray-700, var(--gray-600));
+  font-family: inherit;
+  height: auto;
+  width: auto;
+  cursor: pointer;
+  transition: border-color var(--transition);
+  outline: none;
+}
+
+.logs-time-filter:focus { border-color: var(--primary); }
+
+.logs-custom-range {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.logs-datetime-input {
+  font-size: 0.65rem;
+  padding: 3px 5px;
+  border: 1px solid var(--gray-300);
+  border-radius: 5px;
+  background: var(--gray-50);
+  color: var(--gray-900);
+  font-family: inherit;
+  width: auto;
+  height: auto;
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+.logs-datetime-input:focus { border-color: var(--primary); }
+
+.logs-range-sep {
+  font-size: 0.65rem;
+  color: var(--gray-400);
+}
+
+/* Copy button flash state */
+.logs-copy-btn.copied {
+  background: var(--success-light);
+  color: var(--success-dark);
+  border-color: var(--success);
+}

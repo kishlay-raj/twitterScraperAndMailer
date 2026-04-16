@@ -59,11 +59,12 @@ function markdownToEmailHtml(text) {
         const innerHtml = renderLines(currentSection.lines);
         parts.push(`
 <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+       class="em-section-block"
        style="width:100%;margin:12px 0 0 0;border-radius:8px;overflow:hidden;
               border:1px solid ${style.border};">
   <tr>
     <td style="background:${style.bg};padding:10px 14px 4px 14px;">
-      <div style="font-size:12px;font-weight:800;color:${style.title};
+      <div class="em-section-title" style="font-size:12px;font-weight:800;color:${style.title};
                   text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
         ${currentSection.title}
       </div>
@@ -88,7 +89,7 @@ function markdownToEmailHtml(text) {
             if (/^[-•]\s+/.test(line)) {
                 if (!inUl) { out.push('<ul style="margin:4px 0 8px 0;padding-left:16px;">'); inUl = true; }
                 const item = line.replace(/^[-•]\s+/, '');
-                out.push(`<li style="font-size:13.5px;color:#1c1917;line-height:1.7;margin-bottom:3px;">${item}</li>`);
+                out.push(`<li class="em-section-text" style="font-size:13.5px;color:#1c1917;line-height:1.7;margin-bottom:3px;">${item}</li>`);
                 continue;
             }
 
@@ -101,7 +102,7 @@ function markdownToEmailHtml(text) {
 
             // Lines that look like "**Label:** text" — highlight the label
             // (already converted to <strong> above)
-            out.push(`<div style="font-size:13.5px;color:#1c1917;line-height:1.75;margin-bottom:3px;">${line}</div>`);
+            out.push(`<div class="em-section-text" style="font-size:13.5px;color:#1c1917;line-height:1.75;margin-bottom:3px;">${line}</div>`);
         }
         if (inUl) out.push('</ul>');
         return out.join('\n');
@@ -156,7 +157,7 @@ function markdownToEmailHtml(text) {
  * @param {string} [customPrompt] - Optional instruction — replaces the default prompt entirely.
  * @returns {Promise<string>} Summary HTML with model attribution.
  */
-async function summarizeTweets(tweets, geminiApiKeys, hfApiKey, customPrompt, enableFactCheck = true, enableGlossary = true) {
+async function summarizeTweets(tweets, geminiApiKeys, hfApiKey, customPrompt, enableFactCheck = true, enableGlossary = true, summaryMode = 'minimal') {
     if (!tweets || tweets.length === 0) return "No updates in the last 24 hours.";
 
     const textPayload = tweets.map((t, idx) => {
@@ -175,7 +176,23 @@ async function summarizeTweets(tweets, geminiApiKeys, hfApiKey, customPrompt, en
         sectionsInstruction += `\n\n## 📖 Glossary of Terms\nList any jargon, acronyms, or niche terms using "- **Term:** definition" format.\nIf no complex terms appear, write: No lesser-known terms detected.`;
     }
 
-    const defaultInstruction = `You are an expert analyst. Summarize the following tweets into a concise, scannable digest.\n\nStart with a single bold sentence giving the big-picture overview.\nThen write exactly these sections using these headers:\n\n## 📝 Minimal Summary\nSynthesize the tweets into 4–6 concise bullet points (use "- " prefix). Be factual and direct. No fluff.${sectionsInstruction}`;
+    const minimalInstruction = `You are an expert analyst. Summarize the following tweets into a concise, scannable digest.
+
+Start with a single bold sentence giving the big-picture overview.
+Then write exactly these sections using these headers:
+
+## 📝 Minimal Summary
+Synthesize the tweets into 4–6 concise bullet points (use "- " prefix). Be factual and direct. No fluff.${sectionsInstruction}`;
+
+    const normalInstruction = `You are an expert analyst. Summarize the following tweets into a comprehensive, detailed digest.
+
+Start with a single bold sentence giving the big-picture overview.
+Then write exactly this section:
+
+## 📝 Full Summary
+Provide a detailed bulleted summary (use "- " prefix) that synthesizes all the tweets together. Group related updates, narratives, or events into cohesive points. Be thorough—capture specific details, names, and figures. There is no limit on the number of bullets, but focus on the collective story told by the tweets.${sectionsInstruction}`;
+
+    const defaultInstruction = summaryMode === 'normal' ? normalInstruction : minimalInstruction;
 
     let instruction = (customPrompt && customPrompt.trim()) ? customPrompt.trim() : defaultInstruction;
 
@@ -196,6 +213,16 @@ async function summarizeTweets(tweets, geminiApiKeys, hfApiKey, customPrompt, en
 
     const geminiErrors = [];
 
+    // Distribute load by rotating the starting key. We pick a random offset
+    // so different profiles/categories don't always hammer the first key.
+    if (geminiKeyList.length > 1) {
+        const offset = Math.floor(Math.random() * geminiKeyList.length);
+        const rotatedKeys = geminiKeyList.slice(offset).concat(geminiKeyList.slice(0, offset));
+        // Replace array contents keeping the original variable
+        geminiKeyList.length = 0;
+        geminiKeyList.push(...rotatedKeys);
+    }
+
     for (let i = 0; i < geminiKeyList.length; i++) {
         const key = geminiKeyList[i];
         const keyLabel = geminiKeyList.length > 1 ? ` (key ${i + 1}/${geminiKeyList.length})` : '';
@@ -208,7 +235,7 @@ async function summarizeTweets(tweets, geminiApiKeys, hfApiKey, customPrompt, en
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         contents: [{ parts: [{ text: prompt }] }],
-                        generationConfig: { maxOutputTokens: 1500 }
+                        generationConfig: { maxOutputTokens: 3000 }
                     })
                 },
                 GEMINI_TIMEOUT_MS
@@ -220,12 +247,23 @@ async function summarizeTweets(tweets, geminiApiKeys, hfApiKey, customPrompt, en
             }
 
             const data = await res.json();
-            const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+            const candidate = data?.candidates?.[0];
+            const raw = candidate?.content?.parts?.[0]?.text;
             if (!raw) throw new Error("Empty response from Gemini.");
 
-            console.log(`[LLM] Summary generated via Gemini${keyLabel}.`);
-            const attribution = `<div style="margin-top:12px;font-size:11px;color:#9ca3af;font-style:italic;text-align:right;">— Gemini 2.0 Flash${keyLabel}</div>`;
-            return markdownToEmailHtml(raw.trim()) + attribution;
+            // Detect truncated responses — the model hit the token cap mid-generation
+            const finishReason = candidate?.finishReason;
+            if (finishReason === 'MAX_TOKENS') {
+                console.warn(`[LLM] Gemini${keyLabel} ⚠️ Response was TRUNCATED (finishReason: MAX_TOKENS). The summary may be incomplete.`);
+            } else {
+                console.log(`[LLM] Summary generated via Gemini${keyLabel} (finishReason: ${finishReason}).`);
+            }
+
+            const truncationNote = finishReason === 'MAX_TOKENS'
+                ? `<div style="margin-top:8px;font-size:11px;color:#f97316;font-style:italic;text-align:right;">⚠️ Summary may be incomplete (token limit reached)</div>`
+                : '';
+            const attribution = `<div style="margin-top:12px;font-size:11px;color:#9ca3af;font-style:italic;text-align:right;">— Gemini 3 Flash${keyLabel}</div>`;
+            return markdownToEmailHtml(raw.trim()) + truncationNote + attribution;
 
         } catch (err) {
             const isTimeout = err.message && err.message.startsWith('TIMEOUT_');

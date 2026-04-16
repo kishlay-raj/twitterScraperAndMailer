@@ -350,6 +350,7 @@ async function scrapeAndDispatchContinuation(categoryIndex) {
             [category.name]: {
                 extraEmails: category.enableExtraEmails !== false ? (category.extraEmails || '') : '',
                 enableCategorySummary: category.enableCategorySummary === true,
+                summaryMode: category.categorySummaryMode || (category.enableCategorySummary ? 'minimal' : 'off'),
                 enableFactCheck: category.enableFactCheck !== false,
                 enableGlossary: category.enableGlossary !== false,
                 summaryPrompt: category.summaryPrompt || '',
@@ -506,6 +507,7 @@ async function scrapeAndDispatchCategory(categoryIndex) {
             [category.name]: {
                 extraEmails: category.enableExtraEmails !== false ? (category.extraEmails || '') : '',
                 enableCategorySummary: category.enableCategorySummary === true,
+                summaryMode: category.categorySummaryMode || (category.enableCategorySummary ? 'minimal' : 'off'),
                 enableFactCheck: category.enableFactCheck !== false,
                 enableGlossary: category.enableGlossary !== false,
                 summaryPrompt: category.summaryPrompt || '',
@@ -803,7 +805,7 @@ async function processAndDispatch(payload) {
     }
 
     for (const [categoryName, categoryData] of Object.entries(payload)) {
-        const { extraEmails, profiles, enableCategorySummary, enableFactCheck, enableGlossary, summaryPrompt, partLabel: incomingPartLabel } = categoryData;
+        const { extraEmails, profiles, enableCategorySummary, summaryMode, enableFactCheck, enableGlossary, summaryPrompt, partLabel: incomingPartLabel } = categoryData;
 
         // Sort: profiles with tweets first, "no new updates" profiles last
         const sortedProfiles = [...profiles].sort((a, b) => {
@@ -824,11 +826,11 @@ async function processAndDispatch(payload) {
             const avatarUrl = meta.profileAvatarUrl || '';
 
             // ── Profile section separator ──────────────────────────────────────────
-            let profileHtml = `
-          <!-- ── PROFILE CARD ── -->
+            let profileHtml = `          <!-- ── PROFILE CARD ── -->
           <tr>
             <td style="padding:16px 28px 0 28px;">
               <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+                     class="em-profile-card"
                      style="width:100%; background:#f8f7ff; border:1px solid #e0e7ff;
                              border-radius:10px; overflow:hidden;">
                 <tr>
@@ -845,7 +847,7 @@ async function processAndDispatch(payload) {
                                       border:2px solid #6366f1;" />
                         </td>
                         <td style="vertical-align:middle;">
-                          <div style="font-weight:700; font-size:15px; color:#111827;
+                          <div class="em-profile-name" style="font-weight:700; font-size:15px; color:#111827;
                                       line-height:1.3;">
                             ${displayName || handle || 'X Profile'}
                           </div>
@@ -861,13 +863,12 @@ async function processAndDispatch(payload) {
               </table>
             </td>
           </tr>
-            `;
+`;
 
             if (profile.error) {
-                profileHtml += `
-          <tr>
+                profileHtml += `          <tr>
             <td style="padding:10px 28px 16px 28px;">
-              <div style="background:#fef2f2; border-left:4px solid #ef4444;
+              <div class="em-error-box" style="background:#fef2f2; border-left:4px solid #ef4444;
                            border-radius:0 6px 6px 0; padding:12px 14px;
                            font-size:13px; color:#b91c1c; font-weight:600;">
                 ⚠️ Error scraping profile: ${profile.error}
@@ -880,10 +881,9 @@ async function processAndDispatch(payload) {
             }
 
             if (profile.tweets.length === 0) {
-                profileHtml += `
-          <tr>
+                profileHtml += `          <tr>
             <td style="padding:10px 28px 20px 28px;">
-              <div style="background:#fffbeb; border-left:4px solid #fbbf24;
+              <div class="em-no-update" style="background:#fffbeb; border-left:4px solid #fbbf24;
                            border-radius:0 6px 6px 0; padding:12px 14px;
                            font-size:13px; color:#92400e; font-style:italic;">
                 📭 No new updates found in the last 24 hours.
@@ -903,15 +903,14 @@ async function processAndDispatch(payload) {
                     summary = `<em style="color:#dc2626;">⚠️ AI Summary generation failed: ${summaryErr.message}</em>`;
                 }
 
-                profileHtml += `
-          <tr>
+                profileHtml += `          <tr>
             <td style="padding:12px 28px 4px 28px;">
-              <div style="background:#f0fdf4; border-left:4px solid #22c55e;
+              <div class="em-ai-summary-box" style="background:#f0fdf4; border-left:4px solid #22c55e;
                            border-radius:0 8px 8px 0; padding:14px 16px;">
-                <div style="font-size:12px; font-weight:700; color:#15803d;
+                <div class="em-ai-summary-text" style="font-size:12px; font-weight:700; color:#15803d;
                              text-transform:uppercase; letter-spacing:0.5px;
                              margin-bottom:6px;">✨ AI Summary</div>
-                <div style="font-size:14px; color:#1c1917; line-height:1.65;">
+                <div class="em-ai-summary-body" style="font-size:14px; color:#1c1917; line-height:1.65;">
                   ${summary}
                 </div>
               </div>
@@ -938,14 +937,13 @@ async function processAndDispatch(payload) {
                 const border = t.isSubscriberOnly ? 'border:1.5px solid #fbcfe8; border-radius:8px;' : '';
                 const padding = t.isSubscriberOnly ? 'padding:14px;' : `padding:12px 0; ${borderBottom}`;
 
-                profileHtml += `
-              <div style="background:${bgColor}; ${border} ${padding} margin-bottom:${t.isSubscriberOnly ? '10px' : '0'};">
+                profileHtml += `              <div class="em-tweet" style="background:${bgColor}; ${border} ${padding} margin-bottom:${t.isSubscriberOnly ? '10px' : '0'};">
 
                 <!-- Date + badges row -->
                 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%; margin-bottom:6px;">
                   <tr>
                     <td>
-                      <span style="font-size:11px; color:#9ca3af;">🕒 ${dateStr}</span>
+                      <span class="em-ts" style="font-size:11px; color:#9ca3af;">🕒 ${dateStr}</span>
                       ${t.isSubscriberOnly ? `<span style="margin-left:8px; background:#ec4899; color:#fff; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:700;">⭐ SUBSCRIBERS ONLY</span>` : ''}
                     </td>
                   </tr>
@@ -953,15 +951,15 @@ async function processAndDispatch(payload) {
 
                 ${t.isRetweet ? `<div style="font-size:12px; color:#10b981; font-weight:700; margin-bottom:4px;">🔁 Reposted from ${t.authorName} (${t.authorHandle})</div>` : ''}
 
-                ${t.replyContext ? `
+                                ${t.replyContext ? `
                 <!-- Quoted parent tweet for reply context -->
-                <div style="border-left:3px solid #d1d5db; border-radius:0 6px 6px 0;
+                <div class="em-reply-block" style="border-left:3px solid #d1d5db; border-radius:0 6px 6px 0;
                             background:#f9fafb; padding:10px 12px; margin-bottom:10px;">
-                  <div style="font-size:11px; color:#6b7280; margin-bottom:5px; font-weight:600;">
+                  <div class="em-label" style="font-size:11px; color:#6b7280; margin-bottom:5px; font-weight:600;">
                     ↩️ Replying to
                     <span style="color:#6366f1;">${t.replyContext.authorHandle || t.replyContext.authorName || 'unknown'}</span>
                   </div>
-                  <div style="font-size:13px; color:#374151; line-height:1.5; word-break:break-word;
+                  <div class="em-reply-text" style="font-size:13px; color:#374151; line-height:1.5; word-break:break-word;
                               font-style:italic;">
                     ${t.replyContext.text
                             ? (t.replyContext.text.length > 280
@@ -975,14 +973,14 @@ async function processAndDispatch(payload) {
                   </div>` : ''}
                 </div>` : ''}
 
-                <!-- Tweet text -->
-                <div style="font-size:14px; color:#111827; line-height:1.6; margin-bottom:${t.quotedTweet ? '10px' : '8px'}; word-break:break-word;">
+                                <!-- Tweet text -->
+                <div class="em-text" style="font-size:14px; color:#111827; line-height:1.6; margin-bottom:${t.quotedTweet ? '10px' : '8px'}; word-break:break-word;">
                   ${t.text}
                 </div>
 
-                ${t.quotedTweet ? `
+                                ${t.quotedTweet ? `
                 <!-- Quoted tweet card -->
-                <div style="border:1px solid #e0e7ff; border-left:3px solid #6366f1;
+                <div class="em-quote-block" style="border:1px solid #e0e7ff; border-left:3px solid #6366f1;
                             border-radius:0 8px 8px 0; background:#f8f7ff;
                             padding:10px 14px; margin-bottom:10px;">
                   <div style="font-size:11px; color:#6366f1; font-weight:700;
@@ -992,7 +990,7 @@ async function processAndDispatch(payload) {
                             ? `· <span style="color:#4f46e5;">${t.quotedTweet.authorName || ''}${t.quotedTweet.authorHandle ? ' ' + t.quotedTweet.authorHandle : ''}</span>`
                             : ''}
                   </div>
-                  <div style="font-size:13px; color:#374151; line-height:1.55;
+                  <div class="em-quote-text" style="font-size:13px; color:#374151; line-height:1.55;
                               word-break:break-word;">
                     ${t.quotedTweet.text
                             ? (t.quotedTweet.text.length > 280
@@ -1058,7 +1056,7 @@ async function processAndDispatch(payload) {
                 let categorySummaryText = null;
                 let categorySummaryError = null;
                 try {
-                    categorySummaryText = await summarizeTweets(tweetsForSummary, geminiApiKey, llmApiKey, summaryPrompt, enableFactCheck, enableGlossary);
+                    categorySummaryText = await summarizeTweets(tweetsForSummary, geminiApiKey, llmApiKey, summaryPrompt, enableFactCheck, enableGlossary, summaryMode || 'minimal');
                     addLog(`[${categoryName}] LLM responded. Summary length: ${categorySummaryText?.length ?? 0} chars.`);
                 } catch (summaryErr) {
                     categorySummaryError = summaryErr.message;
@@ -1073,21 +1071,21 @@ async function processAndDispatch(payload) {
           <!-- ── CATEGORY SUMMARY BLOCK ── -->
           <tr>
             <td style="padding:20px 28px 12px 28px;">
-              <div style="background:linear-gradient(135deg,#f5f3ff,#ede9fe);
+              <div class="em-summary-box" style="background:linear-gradient(135deg,#f5f3ff,#ede9fe);
                           border:1.5px solid #a78bfa; border-radius:10px;
                           padding:18px 20px;">
-                <div style="font-size:13px; font-weight:800; color:#6d28d9;
+                <div class="em-summary-text" style="font-size:13px; font-weight:800; color:#6d28d9;
                             text-transform:uppercase; letter-spacing:0.6px;
                             margin-bottom:10px;">
                   &#x2728; Category Summary
-                  <span style="font-size:11px; font-weight:500; color:#8b5cf6;
+                  <span class="em-summary-chip" style="font-size:11px; font-weight:500; color:#8b5cf6;
                               text-transform:none; letter-spacing:0;
                               background:#ede9fe; border-radius:10px;
                               padding:2px 8px; margin-left:8px;">
                     ${totalTweets} tweet${totalTweets !== 1 ? 's' : ''} across ${totalProfiles} profile${totalProfiles !== 1 ? 's' : ''}
                   </span>
                 </div>
-                <div style="font-size:14px; color:#1c1917; line-height:1.75;">
+                <div class="em-summary-text" style="font-size:14px; color:#1c1917; line-height:1.75;">
                   ${categorySummaryText}
                 </div>
               </div>
@@ -1098,11 +1096,11 @@ async function processAndDispatch(payload) {
             <td style="padding:4px 28px 10px 28px;">
               <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;">
                 <tr>
-                  <td style="border-top:1px solid #e0e7ff; padding-right:10px;"></td>
-                  <td style="white-space:nowrap; font-size:11px; font-weight:700;
+                  <td class="em-divider-line" style="border-top:1px solid #e0e7ff; padding-right:10px;"></td>
+                  <td class="em-divider-label" style="white-space:nowrap; font-size:11px; font-weight:700;
                              color:#6366f1; text-transform:uppercase; letter-spacing:0.8px;
                              padding:0 10px;">&#x1F4CB; Individual Profiles</td>
-                  <td style="border-top:1px solid #e0e7ff; padding-left:10px;"></td>
+                  <td class="em-divider-line" style="border-top:1px solid #e0e7ff; padding-left:10px;"></td>
                 </tr>
               </table>
             </td>
@@ -1120,15 +1118,15 @@ async function processAndDispatch(payload) {
           <!-- ── SUMMARY FAILURE NOTICE ── -->
           <tr>
             <td style="padding:20px 28px 12px 28px;">
-              <div style="background:#fff7ed; border:1.5px solid #fb923c;
+              <div class="em-failure-box" style="background:#fff7ed; border:1.5px solid #fb923c;
                           border-radius:10px; padding:14px 18px;">
-                <div style="font-size:12px; font-weight:800; color:#c2410c;
+                <div class="em-failure-text" style="font-size:12px; font-weight:800; color:#c2410c;
                             text-transform:uppercase; letter-spacing:0.5px;
                             margin-bottom:8px;">⚠️ AI Summary Unavailable</div>
-                <div style="font-size:13px; color:#7c2d12; line-height:1.65;">
+                <div class="em-failure-text" style="font-size:13px; color:#7c2d12; line-height:1.65;">
                   The AI summary could not be generated for this digest. The email below contains all the raw tweets.
                 </div>
-                <div style="margin-top:10px; padding:10px 12px;
+                <div class="em-failure-code" style="margin-top:10px; padding:10px 12px;
                             background:#fff; border:1px solid #fed7aa;
                             border-radius:6px; font-size:11.5px;
                             color:#9a3412; font-family:monospace;
@@ -1153,53 +1151,110 @@ async function processAndDispatch(payload) {
         const encoder = new TextEncoder();
 
         function buildEmailShell(categoryName, partLabel, profileBlocks) {
-            const header = `
-        <div style="background:#f4f4f5; padding:24px 12px; font-family:Arial,Helvetica,sans-serif;">
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0"
-               style="width:100%; max-width:600px; margin:0 auto; background:#ffffff;
-                      border-radius:12px; overflow:hidden;
-                      box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+            const header = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<style>
+  /* ── Dark-mode overrides (Gmail Android/iOS, Apple Mail) ── */
+  @media (prefers-color-scheme: dark) {
+    .em-outer   { background:#111118 !important; }
+    .em-card    { background:#19191f !important; }
+    .em-tweet   { background:#1e1e2e !important; border-color:#2d2d42 !important; }
+    .em-tweet-border { border-color:#2d2d42 !important; }
 
-          <!-- ── HEADER BANNER ── -->
-          <tr>
-            <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);
-                        padding:28px 28px 20px 28px; text-align:center;">
-              <div style="font-size:22px; font-weight:700; color:#ffffff;
-                          letter-spacing:-0.3px;">🛰️ DailyUpdates Curation</div>
-              <div style="font-size:13px; color:#c7d2fe; margin-top:4px;">${categoryName}${partLabel ? ` — ${partLabel}` : ''}</div>
-            </td>
-          </tr>
+    .em-text    { color:#e4e4f0 !important; }
+    .em-muted   { color:#9494b0 !important; }
+    .em-strong  { color:#e4e4f0 !important; }
+    .em-label   { color:#9494b0 !important; }
+    .em-ts      { color:#6b6b88 !important; }
 
-          <!-- ── INTRO TEXT ── -->
-          <tr>
-            <td style="padding:20px 28px 8px 28px;">
-              <p style="margin:0; font-size:14px; color:#6b7280; line-height:1.6;">
-                Your 24-hour digest from X profiles in
-                <strong style="color:#111827;">${categoryName}</strong>.
-                ${partLabel ? `<br/><span style="font-size:12px; color:#9ca3af;">(${partLabel})</span>` : ''}
-              </p>
-            </td>
-          </tr>
+    .em-profile-card { background:#1e1e2e !important; border-color:#2d2d42 !important; }
+    .em-profile-name { color:#e4e4f0 !important; }
 
-            `;
+    .em-quote-block  { background:#16161f !important; border-color:#3d3d5c !important; }
+    .em-quote-text   { color:#c4c4dc !important; }
+    .em-reply-block  { background:#16161f !important; border-color:#3d3d5c !important; }
+    .em-reply-text   { color:#c4c4dc !important; }
+
+    .em-no-update { background:#1e1a10 !important; border-color:#78580a !important; color:#f0c040 !important; }
+    .em-error-box { background:#1f1010 !important; border-color:#7f2020 !important; color:#f87171 !important; }
+
+    .em-summary-box  { background:#1a1628 !important; border-color:#6d28d9 !important; }
+    .em-summary-text { color:#ddd6fe !important; }
+    .em-summary-chip { background:#2d2045 !important; color:#c4b5fd !important; }
+
+    .em-ai-summary-box  { background:#0f1f14 !important; border-color:#16a34a !important; }
+    .em-ai-summary-text { color:#86efac !important; }
+    .em-ai-summary-body { color:#d4fce3 !important; }
+
+    .em-failure-box  { background:#1e110a !important; border-color:#c2410c !important; }
+    .em-failure-text { color:#fdba74 !important; }
+    .em-failure-code { background:#110d06 !important; border-color:#7c3000 !important; color:#fbbf24 !important; }
+
+    .em-footer      { background:#111118 !important; border-color:#2d2d42 !important; }
+    .em-footer-text { color:#6b6b88 !important; }
+
+    .em-divider-line { border-color:#2d2d42 !important; }
+    .em-divider-label { color:#7c7cb0 !important; }
+
+    .em-section-block { background:#1a1628 !important; border-color:#4c3d6e !important; }
+    .em-section-title { color:#c4b5fd !important; }
+    .em-section-text  { color:#ddd6fe !important; }
+  }
+</style>
+</head>
+<body>
+<div class="em-outer" style="background:#f4f4f5; padding:24px 12px; font-family:Arial,Helvetica,sans-serif;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0"
+       class="em-card"
+       style="width:100%; max-width:600px; margin:0 auto; background:#ffffff;
+              border-radius:12px; overflow:hidden;
+              box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+
+  <!-- ── HEADER BANNER ── -->
+  <tr>
+    <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);
+                padding:28px 28px 20px 28px; text-align:center;">
+      <div style="font-size:22px; font-weight:700; color:#ffffff;
+                  letter-spacing:-0.3px;">🛰️ DailyUpdates Curation</div>
+      <div style="font-size:13px; color:#c7d2fe; margin-top:4px;">${categoryName}${partLabel ? ` — ${partLabel}` : ''}</div>
+    </td>
+  </tr>
+
+  <!-- ── INTRO TEXT ── -->
+  <tr>
+    <td style="padding:20px 28px 8px 28px;">
+      <p class="em-muted" style="margin:0; font-size:14px; color:#6b7280; line-height:1.6;">
+        Your 24-hour digest from X profiles in
+        <strong class="em-strong" style="color:#111827;">${categoryName}</strong>.
+        ${partLabel ? `<br/><span class="em-ts" style="font-size:12px; color:#9ca3af;">(${partLabel})</span>` : ''}
+      </p>
+    </td>
+  </tr>
+
+`;
 
             const footer = `
 
-          <!-- ── FOOTER ── -->
-          <tr>
-            <td style="background:#f8f7ff; border-top:1px solid #e0e7ff;
-                        padding:16px 28px; text-align:center;">
-              <div style="font-size:12px; color:#9ca3af;">
-                Sent by <strong style="color:#6366f1;">DailyUpdates Extension</strong>
-                &nbsp;·&nbsp;
-                <span>${new Date().toLocaleDateString([], { dateStyle: 'medium' })}</span>
-              </div>
-            </td>
-          </tr>
+  <!-- ── FOOTER ── -->
+  <tr>
+    <td class="em-footer" style="background:#f8f7ff; border-top:1px solid #e0e7ff;
+                padding:16px 28px; text-align:center;">
+      <div class="em-footer-text" style="font-size:12px; color:#9ca3af;">
+        Sent by <strong style="color:#6366f1;">DailyUpdates Extension</strong>
+        &nbsp;·&nbsp;
+        <span>${new Date().toLocaleDateString([], { dateStyle: 'medium' })}</span>
+      </div>
+    </td>
+  </tr>
 
-        </table>
-        </div>
-            `;
+</table>
+</div>
+</body>
+</html>`;
 
             return header + profileBlocks.join('') + footer;
         }

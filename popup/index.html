@@ -99,7 +99,26 @@
     <section class="section logs-section">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
         <h2 style="margin: 0;">Recent Logs</h2>
-        <button id="clear-logs-btn" class="utility-btn">Clear</button>
+        <div style="display: flex; gap: 5px; align-items: center;">
+          <button id="copy-logs-btn" class="utility-btn logs-copy-btn" title="Copy logs to clipboard">📋 Copy</button>
+          <button id="clear-logs-btn" class="utility-btn">Clear</button>
+        </div>
+      </div>
+      <!-- Time range filter row -->
+      <div class="logs-filter-row">
+        <label class="logs-filter-label">🕐 Filter:</label>
+        <select id="logs-time-filter" class="logs-time-filter">
+          <option value="all">All Time</option>
+          <option value="1h">Last 1 Hour</option>
+          <option value="6h">Last 6 Hours</option>
+          <option value="24h">Last 24 Hours</option>
+          <option value="custom">Custom Range</option>
+        </select>
+        <div id="logs-custom-range" class="logs-custom-range" style="display: none;">
+          <input type="datetime-local" id="logs-range-from" class="logs-datetime-input" title="From">
+          <span class="logs-range-sep">→</span>
+          <input type="datetime-local" id="logs-range-to" class="logs-datetime-input" title="To">
+        </div>
       </div>
       <div id="logs-container" class="logs-container">
         <!-- Logs will be injected here -->
