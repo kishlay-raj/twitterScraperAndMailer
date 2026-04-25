@@ -101,10 +101,31 @@ function extractProfileMeta(pagePathname) {
         });
     }
 
-    bgLog(`Profile meta: name="${profileName}", handle="${profileHandle}", avatar=${profileAvatarUrl ? profileAvatarUrl.slice(0, 60) + '...' : 'NOT FOUND'}`);
+    // Fallback: document.title usually follows "Name (@handle) / X"
+    if (!profileName) {
+        const titleMatch = document.title.match(/^(.*?)\s\(/);
+        if (titleMatch && titleMatch[1]) {
+            profileName = titleMatch[1].trim();
+        }
+    }
+
+    // Only log internally in extractProfileMetaAsync to avoid spam during polling
     return { profileName, profileHandle, profileAvatarUrl };
 }
 
+async function extractProfileMetaAsync(pagePathname) {
+    for (let i = 0; i < 8; i++) {
+        const meta = extractProfileMeta(pagePathname);
+        if (meta.profileName !== '') {
+            bgLog(`Profile meta: name="${meta.profileName}", handle="${meta.profileHandle}", avatar=${meta.profileAvatarUrl ? meta.profileAvatarUrl.slice(0, 60) + '...' : 'NOT FOUND'}`);
+            return meta;
+        }
+        await new Promise(r => setTimeout(r, 250));
+    }
+    const meta = extractProfileMeta(pagePathname);
+    bgLog(`Profile meta (fallback): name="${meta.profileName}", handle="${meta.profileHandle}", avatar=${meta.profileAvatarUrl ? meta.profileAvatarUrl.slice(0, 60) + '...' : 'NOT FOUND'}`);
+    return meta;
+}
 
 async function extractTweets(globalProcessedIds = [], settings = {}) {
     const tweetsData = [];
@@ -114,11 +135,12 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
     // so we MUST read it while the page is still at the top.
     // We read the pathname once here so it can also be injected in tests.
     const pagePathname = (typeof window !== 'undefined' && window.location) ? window.location.pathname : '/';
-    const profileMeta = extractProfileMeta(pagePathname);
+    const profileMeta = await extractProfileMetaAsync(pagePathname);
 
     // Seed the set with previously sent tweet IDs so we immediately skip them
     const processedTweetIds = new Set(globalProcessedIds);
     const startTime = Date.now();
+    let activeTimeMs = 0;
 
     let attemptsWithNoNewTweets = 0;
     const maxAttempts = 3;
@@ -136,6 +158,7 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
     bgLog(`DailyUpdates Scraper started... Pre-loaded ${globalProcessedIds.length} old tweets to skip.`);
 
     while (attemptsWithNoNewTweets < maxAttempts) {
+        const loopStartTime = Date.now();
         // 1. Find all tweet elements on the screen
         const tweetElements = document.querySelectorAll('[data-testid="tweet"]');
         let addedNewTweetThisCycle = false;
@@ -152,8 +175,25 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
                 continue; // silently skip already-seen tweets
             }
 
-            // Skip pinned tweets completely so they don't trigger the 24-hour stop condition
+            // Extract just the social context first to know if it's a retweet or pinned
             const socialContextText = tweetEl.querySelector('[data-testid="socialContext"]')?.textContent || '';
+            const isRetweet = socialContextText.toLowerCase().includes('reposted') || tweetEl.innerHTML.includes('reposted');
+
+            // Skip primary tweets that belong to other users unless it's a retweet by the main profile
+            if (profileMeta.profileHandle && tweetUrl !== 'Unknown URL') {
+                const targetPath = `/${profileMeta.profileHandle.replace('@', '').toLowerCase()}/status/`;
+                const isTargetProfileTweet = tweetUrl.toLowerCase().includes(targetPath);
+
+                if (!isTargetProfileTweet && !isRetweet) {
+                    bgLog(`-> Skipping: Tweet URL (${tweetUrl}) does not match target profile ${profileMeta.profileHandle}. Probably a parent thread tweet.`);
+                    lastSkippedParentTweetCell = tweetEl.closest('[data-testid="cellInnerDiv"]');
+                    if (tweetId !== 'Unknown ID') processedTweetIds.add(tweetId);
+                    addedNewTweetThisCycle = true; // Prevents the scraper from thinking it stalled
+                    continue; // Skip immediately BEFORE expensive DOM/Date parsing!
+                }
+            }
+
+            // Skip pinned tweets completely so they don't trigger the 24-hour stop condition
             const isPinnedText = socialContextText.includes('Pinned') || socialContextText.includes('pinned');
 
             const isPinnedSvg = tweetEl.querySelector('svg path[d*="M19.141 12l.812-1.928"]') || // Common Pinned SVG path
@@ -317,22 +357,6 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
                 }
             }
 
-            const isRetweet = socialContextText.toLowerCase().includes('reposted') || tweetEl.innerHTML.includes('reposted');
-
-            // Skip primary tweets that belong to other users unless it's a retweet by the main profile
-            if (profileMeta.profileHandle && tweetUrl !== 'Unknown URL') {
-                const targetPath = `/${profileMeta.profileHandle.replace('@', '').toLowerCase()}/status/`;
-                const isTargetProfileTweet = tweetUrl.toLowerCase().includes(targetPath);
-
-                if (!isTargetProfileTweet && !isRetweet) {
-                    bgLog(`-> Skipping: Tweet URL (${tweetUrl}) does not match target profile ${profileMeta.profileHandle}. Probably a parent thread tweet.`);
-                    lastSkippedParentTweetCell = tweetEl.closest('[data-testid="cellInnerDiv"]');
-                    if (tweetId !== 'Unknown ID') processedTweetIds.add(tweetId);
-                    addedNewTweetThisCycle = true; // Prevents the scraper from thinking it stalled
-                    continue;
-                }
-            }
-
             // Detect Subscriber-only posts
             // 1. Check for the specific SVG path X uses for the "Subscriber" icon (person with a star)
             const isSubscriberSvg = Array.from(tweetEl.querySelectorAll('svg path')).some(path => {
@@ -424,8 +448,11 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
             addedNewTweetThisCycle = true;
         }
 
+        const loopElapsedMs = Date.now() - loopStartTime;
+        activeTimeMs += Math.min(loopElapsedMs, 30000); // cap to 30s per loop to safely bypass system sleep jumps
+
         // Check if we hit the maximum attempts or the 4 minute safety limit to prevent Chrome Extension port channel disconnects
-        if ((Date.now() - startTime) > 4 * 60 * 1000) {
+        if (activeTimeMs > 4 * 60 * 1000) {
             bgLog(`Scraping interrupted: Approaching Chrome 5-minute timeout. Sending available data.`);
             break;
         }

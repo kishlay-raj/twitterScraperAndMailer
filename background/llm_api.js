@@ -1,6 +1,6 @@
 /**
  * LLM API Integration for Summarization
- * Primary: Google Gemini (gemini-2.0-flash) — supports multiple comma-separated keys tried in order
+ * Primary: Google Gemini (Gemini 2.5 Flash) — supports multiple comma-separated keys tried in order
  * Fallback: Hugging Face (Qwen/Qwen2.5-72B-Instruct)
  */
 
@@ -202,7 +202,17 @@ Provide a detailed bulleted summary (use "- " prefix) that synthesizes all the t
 
     const prompt = `${instruction}\n\nTweets:\n${textPayload}`;
 
-    // ── Primary: Gemini ────────────────────────────────────────────────────────
+    // ── Primary: Gemini (multi-model fallback) ─────────────────────────────────
+    // Models ordered by preference: newest/fastest first, older stable as fallback.
+    // When a model returns 503 (overloaded) or 429 (rate-limited), we try the
+    // next model before moving to the next API key.
+    const GEMINI_MODELS = [
+        { id: 'gemini-2.5-flash',        displayName: 'Gemini 2.5 Flash' },
+        { id: 'gemini-2.5-flash-lite',   displayName: 'Gemini 2.5 Flash-Lite' },
+        { id: 'gemini-2.5-pro',          displayName: 'Gemini 2.5 Pro' },
+        { id: 'gemini-3-flash-preview',  displayName: 'Gemini 3 Flash Preview' },
+    ];
+
     const geminiKeyList = geminiApiKeys
         ? geminiApiKeys.split(',').map(k => k.trim()).filter(Boolean)
         : [];
@@ -218,64 +228,97 @@ Provide a detailed bulleted summary (use "- " prefix) that synthesizes all the t
     if (geminiKeyList.length > 1) {
         const offset = Math.floor(Math.random() * geminiKeyList.length);
         const rotatedKeys = geminiKeyList.slice(offset).concat(geminiKeyList.slice(0, offset));
-        // Replace array contents keeping the original variable
         geminiKeyList.length = 0;
         geminiKeyList.push(...rotatedKeys);
     }
 
+    // Helper: checks if an error is a "model busy" error worth trying next model
+    const isModelBusy = (errMsg) => {
+        const lower = errMsg.toLowerCase();
+        return lower.includes('503') || lower.includes('429') ||
+               lower.includes('overloaded') || lower.includes('high demand') ||
+               lower.includes('resource exhausted') || lower.includes('quota');
+    };
+
     for (let i = 0; i < geminiKeyList.length; i++) {
         const key = geminiKeyList[i];
         const keyLabel = geminiKeyList.length > 1 ? ` (key ${i + 1}/${geminiKeyList.length})` : '';
-        try {
-            console.log(`[LLM] Trying Gemini${keyLabel}...`);
-            const res = await fetchWithTimeout(
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${key}`,
-                {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        contents: [{ parts: [{ text: prompt }] }],
-                        generationConfig: { maxOutputTokens: 3000 }
-                    })
-                },
-                GEMINI_TIMEOUT_MS
-            );
+        const keyModelErrors = [];
 
-            if (!res.ok) {
-                const errBody = await res.text();
-                throw new Error(`HTTP ${res.status}: ${errBody.slice(0, 200)}`);
+        for (let m = 0; m < GEMINI_MODELS.length; m++) {
+            const model = GEMINI_MODELS[m];
+            const label = `${model.displayName}${keyLabel}`;
+            try {
+                console.log(`[LLM] Trying ${label}...`);
+                const res = await fetchWithTimeout(
+                    `https://generativelanguage.googleapis.com/v1beta/models/${model.id}:generateContent?key=${key}`,
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: prompt }] }],
+                            generationConfig: { maxOutputTokens: 3000 }
+                        })
+                    },
+                    GEMINI_TIMEOUT_MS
+                );
+
+                if (!res.ok) {
+                    const errBody = await res.text();
+                    const errMsg = `HTTP ${res.status}: ${errBody.slice(0, 200)}`;
+
+                    // If the model is busy/overloaded, try the next model with same key
+                    if (isModelBusy(errMsg) && m < GEMINI_MODELS.length - 1) {
+                        console.warn(`[LLM] ${label} is busy (${res.status}). Trying next model...`);
+                        keyModelErrors.push(`${model.id}: ${res.status} busy`);
+                        continue; // try next model
+                    }
+                    throw new Error(errMsg);
+                }
+
+                const data = await res.json();
+                const candidate = data?.candidates?.[0];
+                const raw = candidate?.content?.parts?.[0]?.text;
+                if (!raw) throw new Error("Empty response from Gemini.");
+
+                // Detect truncated responses
+                const finishReason = candidate?.finishReason;
+                if (finishReason === 'MAX_TOKENS') {
+                    console.warn(`[LLM] ${label} ⚠️ Response was TRUNCATED (finishReason: MAX_TOKENS).`);
+                } else {
+                    console.log(`[LLM] Summary generated via ${label} (finishReason: ${finishReason}).`);
+                }
+
+                const truncationNote = finishReason === 'MAX_TOKENS'
+                    ? `<div style="margin-top:8px;font-size:11px;color:#f97316;font-style:italic;text-align:right;">⚠️ Summary may be incomplete (token limit reached)</div>`
+                    : '';
+                const attribution = `<div style="margin-top:12px;font-size:11px;color:#9ca3af;font-style:italic;text-align:right;">— ${model.displayName}${keyLabel}</div>`;
+                return markdownToEmailHtml(raw.trim()) + truncationNote + attribution;
+
+            } catch (err) {
+                const isTimeout = err.message && err.message.startsWith('TIMEOUT_');
+                const reason = isTimeout ? `timed out after ${GEMINI_TIMEOUT_MS / 1000}s` : err.message;
+                const shortReason = reason.length > 150 ? reason.slice(0, 150) + '...' : reason;
+                console.warn(`[LLM] ${label} failed: ${shortReason}`);
+
+                // If this model is busy and there are more models, continue to next model
+                if (isModelBusy(shortReason) && m < GEMINI_MODELS.length - 1) {
+                    keyModelErrors.push(`${model.id}: ${shortReason}`);
+                    continue;
+                }
+
+                // Non-busy error (auth, network, etc.) — skip remaining models for this key
+                keyModelErrors.push(`${model.id}: ${shortReason}`);
+                break;
             }
-
-            const data = await res.json();
-            const candidate = data?.candidates?.[0];
-            const raw = candidate?.content?.parts?.[0]?.text;
-            if (!raw) throw new Error("Empty response from Gemini.");
-
-            // Detect truncated responses — the model hit the token cap mid-generation
-            const finishReason = candidate?.finishReason;
-            if (finishReason === 'MAX_TOKENS') {
-                console.warn(`[LLM] Gemini${keyLabel} ⚠️ Response was TRUNCATED (finishReason: MAX_TOKENS). The summary may be incomplete.`);
-            } else {
-                console.log(`[LLM] Summary generated via Gemini${keyLabel} (finishReason: ${finishReason}).`);
-            }
-
-            const truncationNote = finishReason === 'MAX_TOKENS'
-                ? `<div style="margin-top:8px;font-size:11px;color:#f97316;font-style:italic;text-align:right;">⚠️ Summary may be incomplete (token limit reached)</div>`
-                : '';
-            const attribution = `<div style="margin-top:12px;font-size:11px;color:#9ca3af;font-style:italic;text-align:right;">— Gemini 3 Flash${keyLabel}</div>`;
-            return markdownToEmailHtml(raw.trim()) + truncationNote + attribution;
-
-        } catch (err) {
-            const isTimeout = err.message && err.message.startsWith('TIMEOUT_');
-            const reason = isTimeout ? `timed out after ${GEMINI_TIMEOUT_MS / 1000}s` : err.message;
-            const shortReason = reason.length > 150 ? reason.slice(0, 150) + '...' : reason;
-            console.warn(`[LLM] Gemini key ${i + 1} failed: ${shortReason}`);
-            geminiErrors.push(`Key ${i + 1}: ${shortReason}`);
         }
+
+        // All models failed for this key
+        geminiErrors.push(`Key ${i + 1}: ${keyModelErrors.join(' → ')}`);
     }
 
     if (geminiKeyList.length > 0) {
-        console.warn(`[LLM] All Gemini keys exhausted. Falling back to HuggingFace.`);
+        console.warn(`[LLM] All Gemini keys and models exhausted. Falling back to HuggingFace.`);
     }
 
     // ── Fallback: Hugging Face ─────────────────────────────────────────────────
