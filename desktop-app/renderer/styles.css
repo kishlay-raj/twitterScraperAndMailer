@@ -32,10 +32,11 @@
 
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  width: 420px;
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
   background: var(--bg);
   color: var(--gray-900);
-  margin: 0;
   padding: 0;
   font-size: 13px;
   line-height: 1.5;
@@ -638,3 +639,134 @@ button { font-family: inherit; cursor: pointer; transition: all var(--transition
   color: var(--success-dark);
   border-color: var(--success);
 }
+
+/* ── Desktop overrides: renderer.js category layout ─────────── */
+
+/* Expand log panel for desktop window height */
+.logs-container { max-height: 300px; }
+
+/* Category body (collapsible panel below header) */
+.category-body {
+  padding: 10px 12px 14px;
+  border-top: 1px solid var(--gray-200);
+}
+
+/* Active / Inactive badge beside category name */
+.category-status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.63rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.category-status-badge.active {
+  background: var(--success-light);
+  color: var(--success-dark);
+  border: 1px solid var(--success);
+}
+
+.category-status-badge.inactive {
+  background: var(--gray-100);
+  color: var(--gray-500);
+  border: 1px solid var(--gray-300);
+}
+
+/* Horizontal row of category-level toggle options */
+.category-settings-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 7px 10px;
+  background: var(--gray-50);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--gray-200);
+}
+
+/* Inline checkbox + label pill */
+.toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  color: var(--gray-600);
+  font-weight: 500;
+  cursor: pointer;
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--gray-200);
+  background: #fff;
+  transition: all var(--transition);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.toggle-label:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-light);
+}
+
+.toggle-label input[type="checkbox"] {
+  margin: 0;
+  width: 11px;
+  height: 11px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+/* Profile row: checkbox + URL + AI/RT/Replies toggles + delete */
+.profile-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  flex-wrap: wrap;
+}
+
+.profile-row .profile-url {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Add profile: URL input + button inline */
+.add-profile-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.add-profile-row input { flex: 1; }
+
+.add-profile-row .add-profile-btn {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.add-profile-row .add-profile-btn:hover { background: var(--primary-dark); }
+
+/* Log entry error / warn colouring */
+.log-entry.log-error .log-message { color: #f87171; }
+.log-entry.log-warn  .log-message { color: #fbbf24; }

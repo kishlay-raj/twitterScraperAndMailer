@@ -24,7 +24,7 @@ let isRunning = false;
  * Run all active categories sequentially.
  * @param {Function} [addLog] - Optional log callback (defaults to logger.add)
  */
-async function runAllCategories(addLog = logger.add) {
+async function runAllCategories(addLog = logger.add.bind(logger)) {
     if (isRunning) {
         addLog('⚠️ A scrape run is already in progress. Skipping.', 'warn');
         return;
@@ -63,7 +63,7 @@ async function runAllCategories(addLog = logger.add) {
  * @param {number} categoryIndex
  * @param {Function} [addLog]
  */
-async function runSingleCategory(categoryIndex, addLog = logger.add) {
+async function runSingleCategory(categoryIndex, addLog = logger.add.bind(logger)) {
     const categories = store.get('categories') || [];
     const cat = categories[categoryIndex];
     if (!cat) {
@@ -144,6 +144,14 @@ async function _runCategory(categoryIndex, category, addLog) {
                 tweets: [], error: err.message
             });
         }
+    }
+
+    // ── Skip dispatch if there is absolutely no content to email ────────────
+    const totalTweets = compilationPayload.profiles.reduce((sum, p) => sum + (p.tweets?.length || 0), 0);
+    const totalErrors = compilationPayload.profiles.filter(p => p.error).length;
+    if (totalTweets === 0 && totalErrors === 0) {
+        addLog(`[${category.name}] ⏭️ Skipping email — no tweets found across all profiles.`);
+        return;
     }
 
     // ── Build & dispatch the email ─────────────────────────────────────────
