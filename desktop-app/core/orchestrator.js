@@ -223,7 +223,7 @@ async function _buildAndDispatch(categoryName, categoryData, geminiApiKey, llmAp
         if (profile.enableAiSummary) {
             let summary = '';
             try {
-                summary = await summarizeTweets(profile.tweets, geminiApiKey, '', summaryPrompt);
+                summary = await summarizeTweets(profile.tweets, geminiApiKey, llmApiKey, summaryPrompt);
             } catch (e) {
                 summary = `<em style="color:#dc2626;">⚠️ AI Summary failed: ${e.message}</em>`;
             }

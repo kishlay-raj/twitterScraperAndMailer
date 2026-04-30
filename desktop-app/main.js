@@ -82,9 +82,7 @@ function createTray() {
             label: 'Run Now',
             click: async () => {
                 try {
-                    await orchestrator.runAllCategories((logEntry) => {
-                        if (mainWindow) mainWindow.webContents.send('log-entry', logEntry);
-                    });
+                    await orchestrator.runAllCategories();
                 } catch (err) {
                     logger.add(`❌ Tray Run Now failed: ${err.message}`, 'error');
                 }
@@ -121,11 +119,7 @@ function registerIpcHandlers() {
     ipcMain.handle('save-settings', async (event, settings) => {
         store.set('settings', settings);
         // Re-apply the schedule whenever settings are saved
-        scheduler.updateSchedule(settings, async () => {
-            await orchestrator.runAllCategories((logEntry) => {
-                if (mainWindow) mainWindow.webContents.send('log-entry', logEntry);
-            });
-        });
+        scheduler.updateSchedule(settings, () => orchestrator.runAllCategories());
         return { success: true };
     });
 
@@ -151,10 +145,8 @@ function registerIpcHandlers() {
 
     // Run Now (all categories)
     ipcMain.handle('run-now', async () => {
-        // Fire and forget — the orchestrator pushes logs via the callback
-        orchestrator.runAllCategories((logEntry) => {
-            if (mainWindow) mainWindow.webContents.send('log-entry', logEntry);
-        }).catch(err => {
+        // Fire and forget — logger.init() broadcasts every log to the renderer automatically
+        orchestrator.runAllCategories().catch(err => {
             logger.add(`❌ Run Now failed: ${err.message}`, 'error');
         });
         return { status: 'started' };
@@ -162,9 +154,7 @@ function registerIpcHandlers() {
 
     // Run Single Category
     ipcMain.handle('run-category', async (event, categoryIndex) => {
-        orchestrator.runSingleCategory(categoryIndex, (logEntry) => {
-            if (mainWindow) mainWindow.webContents.send('log-entry', logEntry);
-        }).catch(err => {
+        orchestrator.runSingleCategory(categoryIndex).catch(err => {
             logger.add(`❌ Single category run failed: ${err.message}`, 'error');
         });
         return { status: 'started' };
@@ -197,11 +187,7 @@ function registerIpcHandlers() {
             store.setAll(data);
             // Re-apply schedule with new settings
             const settings = data.settings || {};
-            scheduler.updateSchedule(settings, async () => {
-                await orchestrator.runAllCategories((logEntry) => {
-                    if (mainWindow) mainWindow.webContents.send('log-entry', logEntry);
-                });
-            });
+            scheduler.updateSchedule(settings, () => orchestrator.runAllCategories());
             return { success: true, data };
         }
         return { success: false };
@@ -229,11 +215,7 @@ app.whenReady().then(async () => {
 
     // Apply saved schedule
     const settings = store.get('settings') || {};
-    scheduler.updateSchedule(settings, async () => {
-        await orchestrator.runAllCategories((logEntry) => {
-            if (mainWindow) mainWindow.webContents.send('log-entry', logEntry);
-        });
-    });
+    scheduler.updateSchedule(settings, () => orchestrator.runAllCategories());
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();

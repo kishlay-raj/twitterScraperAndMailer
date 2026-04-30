@@ -95,23 +95,23 @@ async function scrapeProfile(url, globalProcessedIds = [], settings = {}, addLog
         // Extra settle time for lazy-loaded images and dynamic content
         await new Promise(r => setTimeout(r, POST_LOAD_SETTLE_MS));
 
-        // Inject utils then scraper into the page and run the extraction
-        const result = await page.evaluate(
-            async (utilsSource, scraperSource, processedIds, scrapeSettings) => {
-                // eslint-disable-next-line no-new-func
-                new Function(utilsSource)();
-                // eslint-disable-next-line no-new-func
-                new Function(scraperSource)();
+        // Step 1: Inject utils and scraper into the page's GLOBAL scope.
+        // page.addScriptTag() evaluates the script exactly like a <script> tag,
+        // so function declarations (randomDelay, humanScroll, extractTweets, etc.)
+        // become properties of window — unlike new Function() which creates a
+        // local scope and never exposes them on window.
+        await page.addScriptTag({ content: UTILS_SOURCE });
+        await page.addScriptTag({ content: SCRAPER_SOURCE });
 
-                // extractTweets is now defined in the page context
+        // Step 2: Call extractTweets (now on window) with our parameters.
+        const result = await page.evaluate(
+            async (processedIds, scrapeSettings) => {
                 try {
                     return await window.extractTweets(processedIds, scrapeSettings);
                 } catch (err) {
                     return { tweets: [], profileMeta: {}, error: err.message };
                 }
             },
-            UTILS_SOURCE,
-            SCRAPER_SOURCE,
             globalProcessedIds,
             settings
         );
