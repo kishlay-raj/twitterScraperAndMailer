@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DailyUpdates Curation</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>DailyUpdates Curation</h1>
+    </header>
+
+    <button id="run-now-btn" class="run-btn">🚀 Run Now</button>
+    <div id="run-status-message"></div>
+
+    <section class="section">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <h2 style="margin: 0;">Add Category</h2>
+        <div>
+          <button id="export-btn" class="utility-btn">Export</button>
+          <button id="import-btn" class="utility-btn">Import</button>
+        </div>
+      </div>
+      <div class="input-group">
+        <input type="text" id="new-category-name" placeholder="E.g., Tech News">
+        <button id="add-category-btn">Add Category</button>
+      </div>
+    </section>
+
+    <div id="categories-container">
+      <!-- Categories injected here -->
+    </div>
+
+    <section class="section settings-section">
+      <h2>General Settings</h2>
+      <div class="input-group">
+        <label for="gemini-api-key">
+          Google Gemini API Key:
+          <span style="font-size:0.75rem; font-weight:400; color:#7c3aed; margin-left:4px;">✨ Primary AI</span>
+        </label>
+        <input type="text" id="gemini-api-key" placeholder="AIza... (add multiple keys separated by commas)">
+        <div style="font-size:0.72rem; color:#6b7280; margin-top:3px;">
+          Separate multiple keys with commas — tried in order as fallback.
+        </div>
+      </div>
+      <div class="input-group">
+        <label for="llm-api-key">
+          Hugging Face Free API Token:
+          <span style="font-size:0.75rem; font-weight:400; color:#6b7280; margin-left:4px;">Fallback</span>
+        </label>
+        <input type="text" id="llm-api-key" placeholder="hf_...">
+      </div>
+      <div class="input-group">
+        <label for="email-api-key">Google Apps Script Webhook URL:</label>
+        <input type="text" id="email-api-key" placeholder="https://script.google.com/macros/s/...">
+      </div>
+      <div class="input-group">
+        <label for="recipient-email">Recipient Email:</label>
+        <input type="email" id="recipient-email" placeholder="you@example.com">
+      </div>
+      <div class="input-group" style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px;">
+        <label for="scrape-duration" style="white-space: nowrap; margin-bottom: 0;">Scrape Duration:</label>
+        <input type="number" id="scrape-duration" placeholder="24" style="width: 80px;" min="1" value="24">
+        <select id="scrape-duration-unit" style="padding: 8px; border-radius: 4px; border: 1px solid #d1d5db; height: 38px;">
+          <option value="hours">Hours</option>
+          <option value="days">Days</option>
+        </select>
+      </div>
+      <div style="margin-bottom: 10px;">
+        <label style="cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: #4b5563;">
+          <input type="checkbox" id="allow-duplicates">
+          Allow processing previously emailed tweets
+        </label>
+      </div>
+      <div class="input-group" style="margin-bottom: 20px;">
+        <label style="cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: #4b5563; margin-bottom: 8px;">
+          <input type="checkbox" id="enable-schedule">
+          Enable Daily Scheduled Run
+        </label>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <input type="time" id="schedule-time" style="flex: 1;">
+        </div>
+      </div>
+      <button id="save-settings-btn" class="primary-btn">💾 Save Settings</button>
+      <div id="status-message"></div>
+    </section>
+
+    <section class="section logs-section">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <h2 style="margin: 0;">Recent Logs</h2>
+        <div style="display: flex; gap: 5px; align-items: center;">
+          <button id="copy-logs-btn" class="utility-btn logs-copy-btn" title="Copy logs to clipboard">📋 Copy</button>
+          <button id="clear-logs-btn" class="utility-btn">Clear</button>
+        </div>
+      </div>
+      <div class="logs-filter-row">
+        <label class="logs-filter-label">🕐 Filter:</label>
+        <select id="logs-time-filter" class="logs-time-filter">
+          <option value="all">All Time</option>
+          <option value="1h">Last 1 Hour</option>
+          <option value="6h">Last 6 Hours</option>
+          <option value="24h">Last 24 Hours</option>
+          <option value="custom">Custom Range</option>
+        </select>
+        <div id="logs-custom-range" class="logs-custom-range" style="display: none;">
+          <input type="datetime-local" id="logs-range-from" class="logs-datetime-input" title="From">
+          <span class="logs-range-sep">→</span>
+          <input type="datetime-local" id="logs-range-to" class="logs-datetime-input" title="To">
+        </div>
+      </div>
+      <div id="logs-container" class="logs-container">
+        <div class="log-entry">No logs yet.</div>
+      </div>
+    </section>
+  </div>
+  <script src="renderer.js"></script>
+</body>
+</html>

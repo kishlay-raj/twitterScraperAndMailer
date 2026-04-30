@@ -1,0 +1,20 @@
+{
+  "name": "dailyupdates-desktop",
+  "version": "2.0.0",
+  "description": "DailyUpdates X Profile Scraper — Electron Desktop App",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "dependencies": {
+    "electron": "^30.0.0",
+    "node-cron": "^3.0.3",
+    "puppeteer": "^22.0.0"
+  },
+  "devDependencies": {
+    "jest": "^30.2.0"
+  },
+  "author": "kishlay-raj",
+  "license": "ISC"
+}
