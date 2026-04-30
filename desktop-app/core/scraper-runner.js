@@ -44,7 +44,7 @@ const POST_LOAD_SETTLE_MS = 2000; // Wait after DOM load for dynamic content
  * @param {number} _retryCount - Internal retry counter
  * @returns {Promise<{ tweets: Object[], profileMeta: Object }>}
  */
-async function scrapeProfile(url, globalProcessedIds = [], settings = {}, addLog = logger.add, _retryCount = 0) {
+async function scrapeProfile(url, globalProcessedIds = [], settings = {}, addLog = logger.add.bind(logger), _retryCount = 0) {
     const userDataDir = path.join(app.getPath('userData'), 'chrome-session');
     let page = null;
 
@@ -71,9 +71,13 @@ async function scrapeProfile(url, globalProcessedIds = [], settings = {}, addLog
             };
         });
 
-        // Navigate to the profile
+        // Navigate to the profile.
+        // Use 'domcontentloaded' NOT 'networkidle2' — X.com is a heavy SPA that
+        // continuously fires XHR/WebSocket requests, so networkidle2 almost never
+        // settles and causes constant 60s timeouts. We manually wait for the tweet
+        // selector below, which is a much more reliable signal.
         await page.goto(url, {
-            waitUntil: 'networkidle2',
+            waitUntil: 'domcontentloaded',
             timeout: PAGE_LOAD_TIMEOUT_MS,
         });
 
@@ -101,6 +105,10 @@ async function scrapeProfile(url, globalProcessedIds = [], settings = {}, addLog
         // become properties of window — unlike new Function() which creates a
         // local scope and never exposes them on window.
         await page.addScriptTag({ content: UTILS_SOURCE });
+        // Disable the Chrome 4-minute timeout guard before injecting scraper.
+        // scraper.js has: if (activeTimeMs > 4 * 60 * 1000) break — designed for
+        // Chrome MV3 service worker limits. In Puppeteer we have no such limit.
+        await page.evaluate(() => { window.__isDesktopApp = true; });
         await page.addScriptTag({ content: SCRAPER_SOURCE });
 
         // Step 2: Call extractTweets (now on window) with our parameters.

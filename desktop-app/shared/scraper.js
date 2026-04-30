@@ -451,8 +451,11 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
         const loopElapsedMs = Date.now() - loopStartTime;
         activeTimeMs += Math.min(loopElapsedMs, 30000); // cap to 30s per loop to safely bypass system sleep jumps
 
-        // Check if we hit the maximum attempts or the 4 minute safety limit to prevent Chrome Extension port channel disconnects
-        if (activeTimeMs > 4 * 60 * 1000) {
+        // Check if we hit the maximum attempts or the 4 minute safety limit.
+        // NOTE: In the Electron desktop app, window.__isDesktopApp is set to true
+        // by scraper-runner.js before injection — this guard is skipped there because
+        // Puppeteer has no service worker timeout limit.
+        if (!window.__isDesktopApp && activeTimeMs > 4 * 60 * 1000) {
             bgLog(`Scraping interrupted: Approaching Chrome 5-minute timeout. Sending available data.`);
             break;
         }

@@ -67,6 +67,11 @@ async function newPage(userDataDir) {
 
     const page = await browser.newPage();
 
+    // Bypass X.com's strict Content-Security-Policy so that page.addScriptTag()
+    // (used in scraper-runner.js) can inject our scraper and utils scripts.
+    // Without this, addScriptTag throws a CSP violation and the scraper never runs.
+    await page.setBypassCSP(true);
+
     // Mask automation flags to reduce X bot detection
     await page.evaluateOnNewDocument(() => {
         Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
