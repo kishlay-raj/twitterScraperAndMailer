@@ -227,9 +227,15 @@ app.on('window-all-closed', () => {
     // app.quit() is only called explicitly via the tray menu
 });
 
-app.on('before-quit', async () => {
+app.on('before-quit', (event) => {
+    // Electron does NOT await async event handlers — the process would exit
+    // before browserPool.close() completes, leaving Chromium as an orphan.
+    // Solution: prevent the default quit, do async cleanup, then exit cleanly.
+    event.preventDefault();
     app.isQuitting = true;
     scheduler.stop();
-    await browserPool.close();
     logger.add('👋 DailyUpdates Desktop shutting down.', 'info');
+    browserPool.close()
+        .catch(err => console.error('[Main] Error closing browser on quit:', err))
+        .finally(() => app.exit(0));
 });

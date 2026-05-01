@@ -326,7 +326,12 @@ function filterLogs(logs, filter) {
 // ─── Persistence Helpers ─────────────────────────────────────────────────────
 
 async function saveCategories() {
-    await window.api.saveCategories(categories);
+    try {
+        await window.api.saveCategories(categories);
+    } catch (err) {
+        console.error('[UI] Failed to save categories:', err);
+        showStatus('status-message', '❌ Failed to save — check logs.', 'error');
+    }
 }
 
 // ─── Event Listeners ─────────────────────────────────────────────────────────

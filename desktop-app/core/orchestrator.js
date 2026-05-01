@@ -171,12 +171,6 @@ async function _runCategory(categoryIndex, category, addLog) {
 async function _buildAndDispatch(categoryName, categoryData, geminiApiKey, llmApiKey, webhookUrl, recipientEmail, addLog) {
     const { extraEmails, profiles, enableCategorySummary, summaryMode, enableFactCheck, enableGlossary, summaryPrompt } = categoryData;
 
-    const shouldRetry = (msg) => {
-        const m = msg.toLowerCase();
-        return m.includes('failed to fetch') || m.includes('busy') || m.includes('timeout') ||
-            m.includes('overload') || m.includes('503') || m.includes('500') || m.includes('429');
-    };
-
     // Sort: profiles with content first
     const sortedProfiles = [...profiles].sort((a, b) => {
         const aHas = a.error || a.tweets.length > 0;

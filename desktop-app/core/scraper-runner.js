@@ -112,6 +112,14 @@ async function scrapeProfile(url, globalProcessedIds = [], settings = {}, addLog
         await page.addScriptTag({ content: SCRAPER_SOURCE });
 
         // Step 2: Call extractTweets (now on window) with our parameters.
+        // IMPORTANT: Only pass the minimal settings extractTweets actually needs
+        // (scrapeDuration + scrapeDurationUnit). Do NOT pass the full settings
+        // object — it contains API keys and email addresses that would be
+        // serialized into X.com's JS heap via page.evaluate.
+        const scrapeSettings = {
+            scrapeDuration: settings.scrapeDuration,
+            scrapeDurationUnit: settings.scrapeDurationUnit,
+        };
         const result = await page.evaluate(
             async (processedIds, scrapeSettings) => {
                 try {
@@ -121,7 +129,7 @@ async function scrapeProfile(url, globalProcessedIds = [], settings = {}, addLog
                 }
             },
             globalProcessedIds,
-            settings
+            scrapeSettings
         );
 
         if (result.error) {
