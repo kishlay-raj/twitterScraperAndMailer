@@ -46,6 +46,8 @@ async function launch(userDataDir) {
                 '--disable-setuid-sandbox',
                 '--disable-blink-features=AutomationControlled', // Reduce bot detection
                 '--start-minimized',
+                '--window-position=9999,9999', // Push off-screen — prevents window stealing focus
+                '--window-size=1280,900',       // Give it a proper size so X renders correctly
             ],
             defaultViewport: null,     // Use natural window viewport
             ignoreHTTPSErrors: true,
