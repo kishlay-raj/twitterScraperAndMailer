@@ -17,7 +17,6 @@ const LOGIN_URL_PATTERNS = [
 ];
 
 const puppeteer = require('puppeteer');
-const { app }   = require('electron'); // needed to reclaim focus after newPage()
 
 let browser = null;
 let isLaunching = false;
@@ -79,6 +78,23 @@ async function newPage(userDataDir) {
 
     const page = await browser.newPage();
 
+    // ── Minimize the Chrome window via CDP ──────────────────────────────────
+    // macOS clips --window-position to screen edges, so the off-screen
+    // approach doesn't fully work. Force-minimizing the window ensures it
+    // can never steal visual focus regardless of how many tabs are opened.
+    try {
+        const session = await page.createCDPSession();
+        const { windowId } = await session.send('Browser.getWindowForTarget');
+        await session.send('Browser.setWindowBounds', {
+            windowId,
+            bounds: { windowState: 'minimized' },
+        });
+        await session.detach();
+    } catch (e) {
+        // Non-fatal — worst case the window is just visible
+        console.warn('[BrowserPool] Could not minimize Chrome window:', e.message);
+    }
+
     // Bypass X.com's strict Content-Security-Policy so that page.addScriptTag()
     // (used in scraper-runner.js) can inject our scraper and utils scripts.
     // Without this, addScriptTag throws a CSP violation and the scraper never runs.
@@ -123,7 +139,6 @@ async function checkLoginStatus(userDataDir) {
     let page = null;
     try {
         page = await newPage(userDataDir);
-        app.focus({ steal: true }); // reclaim focus — Chrome steals it on every new tab
         await page.goto('https://x.com/home', {
             waitUntil: 'domcontentloaded',
             timeout: 45000, // 45s — generous for cold starts / slow connections

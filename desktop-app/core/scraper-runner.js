@@ -50,7 +50,6 @@ async function scrapeProfile(url, globalProcessedIds = [], settings = {}, addLog
 
     try {
         page = await browserPool.newPage(userDataDir);
-        app.focus({ steal: true }); // reclaim focus — Chrome steals it on every new tab
 
         // Expose a bridge so scraper.js bgLog() calls reach our logger
         await page.exposeFunction('__bgLog', (message) => {
