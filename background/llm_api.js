@@ -257,7 +257,7 @@ Provide a detailed bulleted summary (use "- " prefix) that synthesizes all the t
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
                             contents: [{ parts: [{ text: prompt }] }],
-                            generationConfig: { maxOutputTokens: 3000 }
+                            generationConfig: { maxOutputTokens: 8192 }
                         })
                     },
                     GEMINI_TIMEOUT_MS
@@ -343,7 +343,7 @@ Provide a detailed bulleted summary (use "- " prefix) that synthesizes all the t
                 body: JSON.stringify({
                     model: "Qwen/Qwen2.5-72B-Instruct",
                     messages: [{ role: "user", content: prompt }],
-                    max_tokens: 1200
+                    max_tokens: 4096
                 })
             },
             HF_TIMEOUT_MS
