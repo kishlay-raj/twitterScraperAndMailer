@@ -5,14 +5,29 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --dev"
+    "dev": "electron . --dev",
+    "build:mac": "electron-builder --mac"
+  },
+  "build": {
+    "appId": "com.kishlayraj.dailyupdates",
+    "productName": "DailyUpdates",
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "zip"
+      ]
+    }
   },
   "dependencies": {
-    "electron": "^30.0.0",
     "node-cron": "^3.0.3",
     "puppeteer": "^22.0.0"
   },
   "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^26.8.1",
     "jest": "^30.2.0"
   },
   "author": "kishlay-raj",

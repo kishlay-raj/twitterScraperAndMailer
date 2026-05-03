@@ -25,3 +25,10 @@ Thumbs.db
 config.json
 *.log
 coverage/
+
+# Build artifacts
+dist/
+desktop-app/dist/
+
+# Export files
+dailyupdates_profiles.json
