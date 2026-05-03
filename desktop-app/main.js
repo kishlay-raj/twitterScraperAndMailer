@@ -117,9 +117,21 @@ function registerIpcHandlers() {
     });
 
     ipcMain.handle('save-settings', async (event, settings) => {
+        const oldSettings = store.get('settings') || {};
         store.set('settings', settings);
         // Re-apply the schedule whenever settings are saved
         scheduler.updateSchedule(settings, () => orchestrator.runAllCategories());
+
+        // If headless mode changed, restart the browser pool
+        const oldHeadless = oldSettings.headlessMode !== false; // default true
+        const newHeadless = settings.headlessMode !== false;     // default true
+        if (oldHeadless !== newHeadless) {
+            const userDataDir = path.join(app.getPath('userData'), 'chrome-session');
+            browserPool.restartWithMode(userDataDir, newHeadless).catch(err => {
+                logger.add(`⚠️ Browser restart failed: ${err.message}`, 'error');
+            });
+            logger.add(`🔄 Browser mode changed to ${newHeadless ? 'headless' : 'visible'}.`, 'info');
+        }
         return { success: true };
     });
 
@@ -264,8 +276,10 @@ app.whenReady().then(async () => {
 
     // Launch the shared Puppeteer browser instance
     const userDataDir = path.join(app.getPath('userData'), 'chrome-session');
-    await browserPool.launch(userDataDir);
-    logger.add('🚀 DailyUpdates Desktop started. Browser pool ready.', 'info');
+    const savedSettings = store.get('settings') || {};
+    const headless = savedSettings.headlessMode !== false; // default true (headless)
+    await browserPool.launch(userDataDir, headless);
+    logger.add(`🚀 DailyUpdates Desktop started. Browser pool ready (${headless ? 'headless' : 'visible'}).`, 'info');
 
     // Apply saved schedule
     const settings = store.get('settings') || {};

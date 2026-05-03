@@ -65,6 +65,7 @@ function loadSettingsIntoUI(s) {
     document.getElementById('allow-duplicates').checked = !!s.allowDuplicates;
     document.getElementById('enable-schedule').checked = !!s.enableSchedule;
     document.getElementById('schedule-time').value = s.scheduleTime || '';
+    document.getElementById('headless-mode').checked = s.headlessMode !== false; // default true
 }
 
 function collectSettingsFromUI() {
@@ -78,6 +79,7 @@ function collectSettingsFromUI() {
         allowDuplicates: document.getElementById('allow-duplicates').checked,
         enableSchedule: document.getElementById('enable-schedule').checked,
         scheduleTime: document.getElementById('schedule-time').value,
+        headlessMode: document.getElementById('headless-mode').checked,
     };
 }
 

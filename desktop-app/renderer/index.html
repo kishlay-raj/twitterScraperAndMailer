@@ -83,6 +83,15 @@
           <input type="time" id="schedule-time" style="flex: 1;">
         </div>
       </div>
+      <div style="margin-bottom: 15px;">
+        <label style="cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: #4b5563;">
+          <input type="checkbox" id="headless-mode" checked>
+          Run browser in headless mode
+        </label>
+        <div style="font-size: 0.72rem; color: #6b7280; margin-top: 3px; margin-left: 24px;">
+          Headless = invisible, no window disturbance. Uncheck to use a visible browser if X.com detects headless as a bot.
+        </div>
+      </div>
       <button id="save-settings-btn" class="primary-btn">💾 Save Settings</button>
       <div id="status-message"></div>
     </section>

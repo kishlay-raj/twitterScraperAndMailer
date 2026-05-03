@@ -20,12 +20,14 @@ const puppeteer = require('puppeteer');
 
 let browser = null;
 let isLaunching = false;
+let currentHeadless = true; // Track current headless mode
 
 /**
  * Launch the shared browser. Called once at app startup.
  * @param {string} userDataDir - Path to persist cookies/session (Chrome user data directory)
+ * @param {boolean} [headless=true] - true = new headless (invisible), false = visible Chrome (minimized)
  */
-async function launch(userDataDir) {
+async function launch(userDataDir, headless = true) {
     if (browser) return;
     if (isLaunching) {
         // Wait for the in-progress launch
@@ -36,19 +38,26 @@ async function launch(userDataDir) {
     }
 
     isLaunching = true;
+    currentHeadless = headless;
     try {
+        const args = [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-blink-features=AutomationControlled', // Reduce bot detection
+            '--window-size=1280,900',       // Give it a proper viewport so X renders correctly
+        ];
+
+        // When running headful, push the window off-screen and start minimized
+        if (!headless) {
+            args.push('--start-minimized');
+            args.push('--window-position=9999,9999');
+        }
+
         browser = await puppeteer.launch({
             executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-            headless: false,           // Visible so X can detect genuine browser activity
+            headless: headless ? 'new' : false,
             userDataDir,               // Persist cookies — login once, works forever
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-blink-features=AutomationControlled', // Reduce bot detection
-                '--start-minimized',
-                '--window-position=9999,9999', // Push off-screen — prevents window stealing focus
-                '--window-size=1280,900',       // Give it a proper size so X renders correctly
-            ],
+            args,
             defaultViewport: null,     // Use natural window viewport
             ignoreHTTPSErrors: true,
         });
@@ -58,10 +67,26 @@ async function launch(userDataDir) {
             browser = null;
         });
 
-        console.log('[BrowserPool] Browser launched successfully.');
+        console.log(`[BrowserPool] Browser launched successfully (headless: ${headless}).`);
     } finally {
         isLaunching = false;
     }
+}
+
+/**
+ * Close the current browser and relaunch with the given headless mode.
+ * Used when the user toggles the headless setting at runtime.
+ * @param {string} userDataDir
+ * @param {boolean} headless
+ */
+async function restartWithMode(userDataDir, headless) {
+    if (currentHeadless === headless && browser) {
+        console.log('[BrowserPool] Already running in requested mode, skipping restart.');
+        return;
+    }
+    console.log(`[BrowserPool] Restarting browser (headless: ${headless})...`);
+    await close();
+    await launch(userDataDir, headless);
 }
 
 /**
@@ -73,26 +98,28 @@ async function launch(userDataDir) {
 async function newPage(userDataDir) {
     if (!browser) {
         console.warn('[BrowserPool] Browser not running, relaunching...');
-        await launch(userDataDir);
+        await launch(userDataDir, currentHeadless);
     }
 
     const page = await browser.newPage();
 
-    // ── Minimize the Chrome window via CDP ──────────────────────────────────
+    // ── When running headful, minimize the Chrome window via CDP ─────────
     // macOS clips --window-position to screen edges, so the off-screen
     // approach doesn't fully work. Force-minimizing the window ensures it
     // can never steal visual focus regardless of how many tabs are opened.
-    try {
-        const session = await page.createCDPSession();
-        const { windowId } = await session.send('Browser.getWindowForTarget');
-        await session.send('Browser.setWindowBounds', {
-            windowId,
-            bounds: { windowState: 'minimized' },
-        });
-        await session.detach();
-    } catch (e) {
-        // Non-fatal — worst case the window is just visible
-        console.warn('[BrowserPool] Could not minimize Chrome window:', e.message);
+    if (!currentHeadless) {
+        try {
+            const session = await page.createCDPSession();
+            const { windowId } = await session.send('Browser.getWindowForTarget');
+            await session.send('Browser.setWindowBounds', {
+                windowId,
+                bounds: { windowState: 'minimized' },
+            });
+            await session.detach();
+        } catch (e) {
+            // Non-fatal — worst case the window is just visible
+            console.warn('[BrowserPool] Could not minimize Chrome window:', e.message);
+        }
     }
 
     // Bypass X.com's strict Content-Security-Policy so that page.addScriptTag()
@@ -165,4 +192,4 @@ function getBrowser() {
     return browser;
 }
 
-module.exports = { launch, newPage, close, getBrowser, checkLoginStatus };
+module.exports = { launch, newPage, close, getBrowser, checkLoginStatus, restartWithMode };
