@@ -4,8 +4,10 @@
  * Fallback: Hugging Face (Qwen/Qwen2.5-72B-Instruct)
  */
 
-const GEMINI_TIMEOUT_MS = 30_000;
-const HF_TIMEOUT_MS = 45_000;
+// Desktop app runs in Node.js (no service-worker kill risk), so timeouts can
+// be generous enough for large 8192-token outputs (can take 40-70 s).
+const GEMINI_TIMEOUT_MS = 90_000;  // 90 s — allows large summaries to complete
+const HF_TIMEOUT_MS     = 90_000;  // 90 s — Qwen 72B is slower than Gemini
 
 /**
  * Wraps fetch() in a Promise.race timeout.

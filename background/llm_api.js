@@ -4,8 +4,10 @@
  * Fallback: Hugging Face (Qwen/Qwen2.5-72B-Instruct)
  */
 
-const GEMINI_TIMEOUT_MS = 30_000;
-const HF_TIMEOUT_MS = 45_000;
+// Extension runs in a Chrome MV3 service worker — keep timeouts tight to avoid
+// Chrome killing the worker, but generous enough for 8192-token outputs.
+const GEMINI_TIMEOUT_MS = 60_000;  // 60 s — service worker safe upper bound
+const HF_TIMEOUT_MS     = 70_000;  // 70 s — Qwen 72B needs extra time
 
 /**
  * Wraps fetch() in a Promise.race timeout.
