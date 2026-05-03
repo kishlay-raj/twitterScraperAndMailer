@@ -145,6 +145,15 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
     let attemptsWithNoNewTweets = 0;
     const maxAttempts = 3;
 
+    // ── Smart stop for reply-heavy profiles ────────────────────────────────
+    // X interleaves old reply threads with new tweets, so we can't stop at the
+    // first out-of-window tweet — a new valid tweet may appear right after.
+    // We stop only after MAX_CONSECUTIVE_OLD old tweets in a row with no valid
+    // tweet accepted in between.
+    const MAX_CONSECUTIVE_OLD = 15;
+    let consecutiveOldSkipped  = 0;
+    let hitConsecutiveOldLimit = false;
+
     let durationLimitMs = ONE_DAY_MS;
     if (settings && settings.scrapeDuration && settings.scrapeDurationUnit) {
         durationLimitMs = settings.scrapeDurationUnit === 'days'
@@ -220,9 +229,15 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
 
             // Check if older than scrape duration limit
             if (ageMs > durationLimitMs) {
+                consecutiveOldSkipped++;
                 const limitHours = (durationLimitMs / (1000 * 60 * 60)).toFixed(1);
-                bgLog(`-> Skipping: ${ageHours}h > ${limitHours}h limit. Stopping profile.`);
+                bgLog(`-> Too old: ${ageHours}h > ${limitHours}h (${consecutiveOldSkipped}/${MAX_CONSECUTIVE_OLD} consecutive).`);
                 if (tweetId !== 'Unknown ID') processedTweetIds.add(tweetId);
+                if (consecutiveOldSkipped >= MAX_CONSECUTIVE_OLD) {
+                    // Enough consecutive old content — stop scrolling entirely.
+                    hitConsecutiveOldLimit = true;
+                    break; // exits the inner for…of loop
+                }
                 continue;
             }
 
@@ -446,6 +461,13 @@ async function extractTweets(globalProcessedIds = [], settings = {}) {
 
             processedTweetIds.add(tweetId);
             addedNewTweetThisCycle = true;
+            consecutiveOldSkipped = 0; // valid tweet found — reset the consecutive-old counter
+        }
+
+        // If we hit the consecutive-old limit, stop the outer while loop too.
+        if (hitConsecutiveOldLimit) {
+            bgLog(`Scraping stopped: ${MAX_CONSECUTIVE_OLD} consecutive out-of-window tweets with no valid tweet in between. Profile complete.`);
+            break;
         }
 
         const loopElapsedMs = Date.now() - loopStartTime;

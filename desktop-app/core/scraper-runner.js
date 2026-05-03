@@ -53,7 +53,8 @@ async function scrapeProfile(url, globalProcessedIds = [], settings = {}, addLog
 
         // Expose a bridge so scraper.js bgLog() calls reach our logger
         await page.exposeFunction('__bgLog', (message) => {
-            addLog(`[Scraper] ${message}`, 'info');
+            // message already contains the [Scraper] prefix added by bgLog() in scraper.js
+            addLog(message, 'info');
         });
 
         // Inject a mock chrome.runtime.sendMessage so the scraper source works unchanged
