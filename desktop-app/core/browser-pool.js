@@ -122,7 +122,7 @@ async function checkLoginStatus(userDataDir) {
         page = await newPage(userDataDir);
         await page.goto('https://x.com/home', {
             waitUntil: 'domcontentloaded',
-            timeout: 20000,
+            timeout: 45000, // 45s — generous for cold starts / slow connections
         });
         const finalUrl = page.url();
         const isLoggedOut = LOGIN_URL_PATTERNS.some(p => finalUrl.includes(p));
