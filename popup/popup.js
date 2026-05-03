@@ -71,13 +71,13 @@ function getFilteredLogs(logs) {
   if (filterVal === 'all') return logs;
 
   const now = Date.now();
-  if (filterVal === '1h')  return logs.filter(l => now - l.timestamp <= 60 * 60 * 1000);
-  if (filterVal === '6h')  return logs.filter(l => now - l.timestamp <= 6 * 60 * 60 * 1000);
+  if (filterVal === '1h') return logs.filter(l => now - l.timestamp <= 60 * 60 * 1000);
+  if (filterVal === '6h') return logs.filter(l => now - l.timestamp <= 6 * 60 * 60 * 1000);
   if (filterVal === '24h') return logs.filter(l => now - l.timestamp <= 24 * 60 * 60 * 1000);
 
   if (filterVal === 'custom') {
     const from = logsRangeFrom.value ? new Date(logsRangeFrom.value).getTime() : 0;
-    const to   = logsRangeTo.value   ? new Date(logsRangeTo.value).getTime()   : now;
+    const to = logsRangeTo.value ? new Date(logsRangeTo.value).getTime() : now;
     return logs.filter(l => l.timestamp >= from && l.timestamp <= to);
   }
   return logs;
@@ -546,7 +546,11 @@ function attachEventListeners() {
 
 // Export Config
 exportBtn.addEventListener('click', () => {
-  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state.categories, null, 2));
+  const exportData = {
+    settings: state.settings,
+    categories: state.categories
+  };
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
   const downloadAnchorNode = document.createElement('a');
   downloadAnchorNode.setAttribute("href", dataStr);
   downloadAnchorNode.setAttribute("download", "dailyupdates_profiles.json");

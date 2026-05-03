@@ -29,7 +29,7 @@ describe('Email API', () => {
     test('should send correct POST payload on success', async () => {
         global.fetch.mockResolvedValueOnce({
             ok: true,
-            json: async () => ({ status: 'success' })
+            text: async () => JSON.stringify({ status: 'success' })
         });
 
         const html = '<p>Hello</p>';
@@ -58,7 +58,7 @@ describe('Email API', () => {
     test('should include cc in payload if provided', async () => {
         global.fetch.mockResolvedValueOnce({
             ok: true,
-            json: async () => ({ status: 'success' })
+            text: async () => JSON.stringify({ status: 'success' })
         });
 
         const html = '<p>Hello</p>';
@@ -76,9 +76,9 @@ describe('Email API', () => {
     test('should handle network errors gracefully', async () => {
         global.fetch.mockRejectedValueOnce(new Error('Network failure'));
 
-        await sendEmailPayload('<p>Test</p>', 'test@test.com', 'http://webhook');
+        await expect(sendEmailPayload('<p>Test</p>', 'test@test.com', 'http://webhook')).rejects.toThrow();
 
-        expect(console.error).toHaveBeenCalledWith('Email API failed:', expect.any(Error));
+        expect(console.error).toHaveBeenCalledWith('Email API failed:', 'Network failure');
     });
 
     test('should handle API endpoint errors gracefully', async () => {
@@ -88,8 +88,8 @@ describe('Email API', () => {
             text: async () => 'Internal Server Error'
         });
 
-        await sendEmailPayload('<p>Test</p>', 'test@test.com', 'http://webhook');
+        await expect(sendEmailPayload('<p>Test</p>', 'test@test.com', 'http://webhook')).rejects.toThrow();
 
-        expect(console.error).toHaveBeenCalledWith('Email API failed:', expect.any(Error));
+        expect(console.error).toHaveBeenCalledWith('Email API failed:', expect.stringContaining('Internal Server Error'));
     });
 });

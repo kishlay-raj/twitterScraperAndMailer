@@ -21,8 +21,7 @@ describe('LLM API', () => {
     });
 
     test('should return early error if API key is missing', async () => {
-        const result = await summarizeTweets([{ text: 'hi' }], '');
-        expect(result).toBe('Error: LLM API Key is missing.');
+        await expect(summarizeTweets([{ text: 'hi' }], '')).rejects.toThrow('No AI API keys configured.');
         expect(global.fetch).not.toHaveBeenCalled();
     });
 
@@ -35,7 +34,7 @@ describe('LLM API', () => {
         global.fetch.mockResolvedValueOnce({
             ok: true,
             json: async () => ({
-                choices: [{ message: { content: 'This is the summary.' } }]
+                candidates: [{ content: { parts: [{ text: 'This is the summary.' }] } }]
             })
         });
 
@@ -45,30 +44,28 @@ describe('LLM API', () => {
         const requestBody = JSON.parse(global.fetch.mock.calls[0][1].body);
 
         // Verify the prompt contains our expected identifiers
-        expect(requestBody.messages[0].content).toContain('Hello world');
-        expect(requestBody.messages[0].content).toContain('Second tweet');
-        expect(requestBody.messages[0].content).toContain('Reposted From: Alice (@alice)');
-        expect(requestBody.messages[0].content).toContain('[SUBSCRIBER EXCLUSIVE POST]');
-        expect(result).toBe('This is the summary.');
+        expect(requestBody.contents[0].parts[0].text).toContain('Hello world');
+        expect(requestBody.contents[0].parts[0].text).toContain('Second tweet');
+        expect(requestBody.contents[0].parts[0].text).toContain('Reposted From: Alice (@alice)');
+        expect(requestBody.contents[0].parts[0].text).toContain('[SUBSCRIBER EXCLUSIVE POST]');
+        expect(result).toContain('This is the summary.');
     });
 
     test('should gracefully handle non-ok HTTP responses', async () => {
         global.fetch.mockResolvedValueOnce({
             ok: false,
-            status: 401
+            status: 401,
+            text: async () => 'Unauthorized'
         });
 
-        const result = await summarizeTweets([{ text: 'hi' }], 'invalid_key');
+        await expect(summarizeTweets([{ text: 'hi' }], 'invalid_key')).rejects.toThrow(/401/);
         expect(console.error).toHaveBeenCalled();
-        expect(result).toContain('Error generating summary');
-        expect(result).toContain('401');
     });
 
     test('should gracefully handle network failures', async () => {
         global.fetch.mockRejectedValueOnce(new Error('Network offline'));
 
-        const result = await summarizeTweets([{ text: 'hi' }], 'valid_key');
+        await expect(summarizeTweets([{ text: 'hi' }], 'valid_key')).rejects.toThrow(/Network offline/);
         expect(console.error).toHaveBeenCalled();
-        expect(result).toBe('Error generating summary: Network offline');
     });
 });
