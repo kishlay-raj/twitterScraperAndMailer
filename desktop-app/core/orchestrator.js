@@ -20,6 +20,7 @@ const { app } = require('electron');
 const path = require('path');
 
 let isRunning = false;
+let cancelRequested = false;
 
 // Injected by main.js so the orchestrator can push events to the renderer
 let _notifyRenderer = null;
@@ -73,6 +74,7 @@ async function runAllCategories(addLog = logger.add.bind(logger)) {
         return;
     }
     isRunning = true;
+    cancelRequested = false;
 
     try {
         // ── Login gate: abort/wait if not logged in ────────────────────────
@@ -90,18 +92,27 @@ async function runAllCategories(addLog = logger.add.bind(logger)) {
         addLog(`🚀 Starting scrape run for ${active.length} categories.`);
 
         for (let i = 0; i < categories.length; i++) {
+            if (cancelRequested) {
+                addLog('🛑 Run stopped by user.', 'warn');
+                break;
+            }
             const cat = categories[i];
             if (cat.isActive === false) continue;
             try {
                 await _runCategory(i, cat, addLog);
             } catch (err) {
+                if (cancelRequested) {
+                    addLog('🛑 Run stopped by user.', 'warn');
+                    break;
+                }
                 addLog(`❌ Category [${cat.name}] failed: ${err.message}`, 'error');
             }
         }
 
-        addLog('✅ All categories complete.');
+        if (!cancelRequested) addLog('✅ All categories complete.');
     } finally {
         isRunning = false;
+        cancelRequested = false;
     }
 }
 
@@ -118,6 +129,7 @@ async function runSingleCategory(categoryIndex, addLog = logger.add.bind(logger)
         return;
     }
     isRunning = true;
+    cancelRequested = false;
 
     try {
         const categories = store.get('categories') || [];
@@ -132,9 +144,27 @@ async function runSingleCategory(categoryIndex, addLog = logger.add.bind(logger)
         if (!loggedIn) return;
 
         await _runCategory(categoryIndex, cat, addLog);
+        if (cancelRequested) addLog('🛑 Run stopped by user.', 'warn');
     } finally {
         isRunning = false;
+        cancelRequested = false;
     }
+}
+
+/**
+ * Request cancellation of the current run.
+ * The run will stop after the currently-scraping profile finishes.
+ */
+function stopRun() {
+    if (!isRunning) return false;
+    cancelRequested = true;
+    logger.add('🛑 Stop requested — will halt after current profile finishes.', 'warn');
+    return true;
+}
+
+/** Whether a run is currently in progress. */
+function getIsRunning() {
+    return isRunning;
 }
 
 // ─── Internal ────────────────────────────────────────────────────────────────
@@ -167,6 +197,12 @@ async function _runCategory(categoryIndex, category, addLog) {
 
     // ── Scrape all profiles in one uninterrupted loop ──────────────────────
     for (const profile of activeProfiles) {
+        // ── Check for cancellation between profiles ────────────────────────
+        if (cancelRequested) {
+            addLog(`[${category.name}] 🛑 Stopping — user requested cancellation.`, 'warn');
+            return;
+        }
+
         let targetUrl = profile.url;
         if (profile.scrapeReplies) {
             try {
@@ -508,4 +544,4 @@ function _buildEmailShell(categoryName, partLabel, profileBlocks) {
     return header + profileBlocks.join('') + footer;
 }
 
-module.exports = { runAllCategories, runSingleCategory, setNotifyRenderer };
+module.exports = { runAllCategories, runSingleCategory, setNotifyRenderer, stopRun, getIsRunning };

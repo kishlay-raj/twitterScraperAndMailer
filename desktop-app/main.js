@@ -172,6 +172,17 @@ function registerIpcHandlers() {
         return { status: 'started' };
     });
 
+    // Stop Run
+    ipcMain.handle('stop-run', async () => {
+        const stopped = orchestrator.stopRun();
+        return { stopped };
+    });
+
+    // Run status (is a scrape currently running?)
+    ipcMain.handle('get-run-status', async () => {
+        return { isRunning: orchestrator.getIsRunning() };
+    });
+
     // Import / Export config
     ipcMain.handle('export-config', async () => {
         const data = store.getAll();

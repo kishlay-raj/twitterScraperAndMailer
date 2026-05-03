@@ -36,6 +36,14 @@ async function init() {
     window.api.onLog((entry) => {
         allLogs.push(entry);
         appendLogEntry(entry);
+
+        // Auto-detect run completion and reset the UI
+        const msg = entry.message || '';
+        if (msg.includes('✅ All categories complete') ||
+            msg.includes('🛑 Run stopped by user') ||
+            msg.includes('🔐 Not logged in')) {
+            setRunningState(false);
+        }
     });
 
     // ── Login Required modal ─────────────────────────────────────────────────
@@ -409,10 +417,22 @@ async function saveCategories() {
 // ─── Event Listeners ─────────────────────────────────────────────────────────
 
 function bindEventListeners() {
+    const runBtn = document.getElementById('run-now-btn');
+    const stopBtn = document.getElementById('stop-run-btn');
+
     // Run Now
-    document.getElementById('run-now-btn').addEventListener('click', async () => {
+    runBtn.addEventListener('click', async () => {
         showStatus('run-status-message', '🚀 Run started! Check logs for progress.', 'info');
+        setRunningState(true);
         await window.api.runNow();
+    });
+
+    // Stop Run
+    stopBtn.addEventListener('click', async () => {
+        stopBtn.disabled = true;
+        stopBtn.textContent = '⏳ Stopping...';
+        await window.api.stopRun();
+        showStatus('run-status-message', '🛑 Stop requested — finishing current profile...', 'info');
     });
 
     // Save Settings
@@ -521,6 +541,28 @@ function bindEventListeners() {
 }
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
+
+/**
+ * Toggle UI between "running" and "idle" states.
+ * Shows/hides the stop button and disables/enables the run button.
+ */
+function setRunningState(running) {
+    const runBtn = document.getElementById('run-now-btn');
+    const stopBtn = document.getElementById('stop-run-btn');
+    if (running) {
+        runBtn.disabled = true;
+        runBtn.textContent = '⏳ Running...';
+        stopBtn.style.display = '';
+        stopBtn.disabled = false;
+        stopBtn.textContent = '🛑 Stop Run';
+    } else {
+        runBtn.disabled = false;
+        runBtn.textContent = '🚀 Run Now';
+        stopBtn.style.display = 'none';
+        stopBtn.disabled = false;
+        stopBtn.textContent = '🛑 Stop Run';
+    }
+}
 
 function showStatus(elementId, message, type = 'info') {
     const el = document.getElementById(elementId);

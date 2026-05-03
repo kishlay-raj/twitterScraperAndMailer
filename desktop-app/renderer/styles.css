@@ -98,6 +98,36 @@ h2 {
 
 .run-btn:active { transform: translateY(0); }
 
+/* ── Stop Run button ─────────────────────────────────────────── */
+.stop-btn {
+  padding: 11px 20px;
+  background: linear-gradient(135deg, var(--danger), #dc2626);
+  color: white;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition);
+  letter-spacing: 0.2px;
+  font-family: inherit;
+  white-space: nowrap;
+  animation: stopPulse 1.5s ease-in-out infinite;
+}
+
+.stop-btn:hover {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(239, 68, 68, 0.35);
+}
+
+.stop-btn:active { transform: translateY(0); }
+
+@keyframes stopPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  50%      { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+}
+
 #run-status-message {
   font-size: 0.73rem;
   text-align: center;
