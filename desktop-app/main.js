@@ -176,21 +176,70 @@ function registerIpcHandlers() {
     });
 
     ipcMain.handle('import-config', async () => {
-        const { filePaths } = await dialog.showOpenDialog(mainWindow, {
-            title: 'Import Config',
-            filters: [{ name: 'JSON', extensions: ['json'] }],
-            properties: ['openFile']
-        });
-        if (filePaths && filePaths[0]) {
-            const raw = require('fs').readFileSync(filePaths[0], 'utf8');
-            const data = JSON.parse(raw);
+        console.log('[Main] import-config invoked');
+        try {
+            const result = await dialog.showOpenDialog(mainWindow, {
+                title: 'Import Config',
+                filters: [{ name: 'JSON', extensions: ['json'] }],
+                properties: ['openFile']
+            });
+            console.log('[Main] showOpenDialog result:', result);
+
+            // User cancelled the dialog
+            if (result.canceled || !result.filePaths || !result.filePaths[0]) {
+                console.log('[Main] Import cancelled (no file selected)');
+                return { success: false, cancelled: true };
+            }
+
+            const filePath = result.filePaths[0];
+            console.log('[Main] Reading file:', filePath);
+            const raw = require('fs').readFileSync(filePath, 'utf8');
+            console.log(`[Main] Read ${raw.length} bytes`);
+            let data;
+            try {
+                data = JSON.parse(raw);
+            } catch (parseErr) {
+                console.error('[Main] JSON parse error:', parseErr.message);
+                return { success: false, error: `Invalid JSON file: ${parseErr.message}` };
+            }
+            console.log('[Main] Successfully parsed JSON. Keys:', Array.isArray(data) ? '[array]' : Object.keys(data));
+
+            // Handle legacy format where export was just an array of categories
+            // (Chrome extension only exported categories, never settings)
+            let settingsImported = true;
+            if (Array.isArray(data)) {
+                console.log('[Main] Imported data is an array. Treating as legacy categories-only export.');
+                settingsImported = false; // Tell the renderer not to overwrite UI settings
+                const currentSettings = store.get('settings') || {};
+                data = {
+                    settings: currentSettings, // preserve what's already saved
+                    categories: data
+                };
+            } else if (!data.settings) {
+                // Object format but no settings key — preserve current settings
+                settingsImported = false;
+                data.settings = store.get('settings') || {};
+            }
+
+            // Validate minimal structure
+            if (typeof data !== 'object' || data === null) {
+                return { success: false, error: 'Imported file does not contain a valid config object.' };
+            }
+
             store.setAll(data);
+            console.log('[Main] store.setAll completed');
+
             // Re-apply schedule with new settings
             const settings = data.settings || {};
+            console.log('[Main] Updating schedule with new settings (keys):', Object.keys(settings));
             scheduler.updateSchedule(settings, () => orchestrator.runAllCategories());
-            return { success: true, data };
+
+            console.log('[Main] import-config completed successfully. settingsImported:', settingsImported);
+            return { success: true, data, settingsImported };
+        } catch (err) {
+            console.error('[Main] import-config error:', err);
+            return { success: false, error: err.message };
         }
-        return { success: false };
     });
 }
 
@@ -207,6 +256,11 @@ app.whenReady().then(async () => {
     createWindow();
     createTray();
     registerIpcHandlers();
+
+    // Wire up orchestrator → renderer event bridge (login-required, etc.)
+    orchestrator.setNotifyRenderer((channel, payload) => {
+        if (mainWindow) mainWindow.webContents.send(channel, payload);
+    });
 
     // Launch the shared Puppeteer browser instance
     const userDataDir = path.join(app.getPath('userData'), 'chrome-session');

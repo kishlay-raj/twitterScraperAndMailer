@@ -37,6 +37,20 @@ async function init() {
         allLogs.push(entry);
         appendLogEntry(entry);
     });
+
+    // ── Login Required modal ─────────────────────────────────────────────────
+    const loginModal = document.getElementById('login-modal');
+    const dismissBtn = document.getElementById('login-modal-dismiss');
+
+    // Show the modal when the backend detects no active session
+    window.api.onLoginRequired(() => {
+        loginModal.style.display = 'flex';
+    });
+
+    // Dismiss button closes the modal so the user can go log in
+    dismissBtn.addEventListener('click', () => {
+        loginModal.style.display = 'none';
+    });
 }
 
 // ─── Settings ────────────────────────────────────────────────────────────────
@@ -82,35 +96,35 @@ function buildCategoryEl(cat, idx) {
     section.className = 'section category-section';
     section.dataset.idx = idx;
 
+    // Default to collapsed (isExpanded must be explicitly true to show)
+    const isExpanded = cat.isExpanded === true;
     const activeClass = cat.isActive !== false ? 'active' : 'inactive';
 
     section.innerHTML = `
-    <div class="category-header">
-      <div style="display:flex; align-items:center; gap:10px;">
-        <input type="checkbox" class="cat-active-toggle" ${cat.isActive !== false ? 'checked' : ''} title="Enable/disable category">
-        <h2 class="category-title" style="margin:0;">${escapeHtml(cat.name)}</h2>
+    <div class="category-header" style="cursor:pointer;" title="Click to expand / collapse">
+      <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">
+        <span class="collapse-icon" style="font-size:0.6rem; color:#94a3b8; flex-shrink:0;">${isExpanded ? '▼' : '▶'}</span>
+        <input type="checkbox" class="cat-active-toggle" ${cat.isActive !== false ? 'checked' : ''}
+               title="Enable/disable category" onclick="event.stopPropagation()">
+        <h2 class="category-title" style="margin:0; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(cat.name)}</h2>
         <span class="category-status-badge ${activeClass}">${cat.isActive !== false ? 'Active' : 'Disabled'}</span>
       </div>
-      <div style="display:flex; gap:6px;">
+      <div style="display:flex; gap:6px; flex-shrink:0;" onclick="event.stopPropagation()">
         <button class="run-category-btn utility-btn" title="Run this category now">▶ Run</button>
-        <button class="toggle-category-btn utility-btn">${cat._collapsed ? '▼ Show' : '▲ Hide'}</button>
         <button class="delete-category-btn utility-btn" style="color:#ef4444;">✕ Delete</button>
       </div>
     </div>
 
-    <div class="category-body" ${cat._collapsed ? 'style="display:none;"' : ''}>
+    <div class="category-body" ${!isExpanded ? 'style="display:none;"' : ''}>
 
       <!-- Category-level settings -->
       <div class="category-settings-row">
-        <label class="toggle-label">
-          <input type="checkbox" class="cat-enable-summary" ${cat.enableCategorySummary ? 'checked' : ''}>
-          Category AI Summary
-        </label>
-        <select class="cat-summary-mode" ${!cat.enableCategorySummary ? 'disabled' : ''}>
-          <option value="minimal" ${(cat.categorySummaryMode || 'minimal') === 'minimal' ? 'selected' : ''}>Minimal</option>
-          <option value="normal" ${cat.categorySummaryMode === 'normal' ? 'selected' : ''}>Normal</option>
-          <option value="detailed" ${cat.categorySummaryMode === 'detailed' ? 'selected' : ''}>Detailed</option>
-        </select>
+        <!-- A: Click-to-cycle summary mode pill (Off → Minimal → Normal → Off) -->
+        <button
+          class="cat-badge cat-badge-summarise cat-badge-mode-${cat.categorySummaryMode || 'off'} ${(cat.categorySummaryMode && cat.categorySummaryMode !== 'off') ? 'is-on' : ''}"
+          data-mode="${cat.categorySummaryMode || 'off'}"
+          title="Click to cycle: Off → Minimal → Normal"
+        >${{ off: '✨ Summarise: Off', minimal: '✨ Minimal', normal: '📋 Normal' }[cat.categorySummaryMode || 'off']}</button>
         <label class="toggle-label">
           <input type="checkbox" class="cat-fact-check" ${cat.enableFactCheck !== false ? 'checked' : ''}>
           Fact Check
@@ -121,14 +135,28 @@ function buildCategoryEl(cat, idx) {
         </label>
       </div>
 
-      <div class="input-group" style="margin-bottom:10px;">
-        <label>Extra Recipients (comma-separated):</label>
-        <input type="text" class="cat-extra-emails" value="${escapeHtml(cat.extraEmails || '')}" placeholder="extra@email.com">
+      <!-- B: Extra emails with enable/disable toggle -->
+      <div class="extra-emails-group">
+        <label class="extra-emails-label">
+          <input type="checkbox" class="cat-extra-emails-toggle" ${cat.enableExtraEmails !== false ? 'checked' : ''}>
+          📧 Extra Recipients for this category:
+        </label>
+        <input
+          type="text"
+          class="cat-extra-emails"
+          value="${escapeHtml(cat.extraEmails || '')}"
+          placeholder="extra@example.com, another@example.com"
+          ${cat.enableExtraEmails === false ? 'disabled' : ''}
+        >
       </div>
 
-      <div class="input-group" style="margin-bottom:14px;">
-        <label>Custom Summary Prompt (optional):</label>
-        <textarea class="cat-summary-prompt" rows="3" placeholder="Leave blank to use the default prompt.">${escapeHtml(cat.summaryPrompt || '')}</textarea>
+      <!-- C: Summary prompt — auto-saves on blur, no Save button needed -->
+      <div class="summary-prompt-group">
+        <label class="summary-prompt-label">✏️ Custom Summary Prompt <span style="font-weight:400; color:#94a3b8;">(optional — overrides default)</span></label>
+        <textarea
+          class="cat-summary-prompt"
+          rows="3"
+          placeholder="E.g. Summarise these tweets focusing on product announcements…">${escapeHtml(cat.summaryPrompt || '')}</textarea>
       </div>
 
       <!-- Profile list -->
@@ -141,15 +169,26 @@ function buildCategoryEl(cat, idx) {
         <input type="url" class="new-profile-url" placeholder="https://x.com/username">
         <button class="add-profile-btn">+ Add Profile</button>
       </div>
-
-      <div style="margin-top:10px; text-align:right;">
-        <button class="save-category-btn primary-btn" style="font-size:0.85rem; padding:7px 16px;">💾 Save Category</button>
-      </div>
     </div>
   `;
 
-    // ── Event listeners ──────────────────────────────────────────────────────
+    // ── Collapse: click anywhere on the header row ────────────────────────────
+    section.querySelector('.category-header').addEventListener('click', (e) => {
+        // Don't collapse if clicking interactive elements inside the header
+        if (e.target.closest('button') || e.target.closest('input')) return;
 
+        const nowExpanded = !(categories[idx].isExpanded === true);
+        categories[idx].isExpanded = nowExpanded;
+
+        const body = section.querySelector('.category-body');
+        const icon = section.querySelector('.collapse-icon');
+        body.style.display = nowExpanded ? '' : 'none';
+        icon.textContent = nowExpanded ? '▼' : '▶';
+
+        saveCategories();
+    });
+
+    // ── Active toggle ────────────────────────────────────────────────────────
     section.querySelector('.cat-active-toggle').addEventListener('change', (e) => {
         categories[idx].isActive = e.target.checked;
         section.querySelector('.category-status-badge').textContent = e.target.checked ? 'Active' : 'Disabled';
@@ -157,15 +196,7 @@ function buildCategoryEl(cat, idx) {
         saveCategories();
     });
 
-    section.querySelector('.toggle-category-btn').addEventListener('click', () => {
-        categories[idx]._collapsed = !categories[idx]._collapsed;
-        const body = section.querySelector('.category-body');
-        const btn = section.querySelector('.toggle-category-btn');
-        body.style.display = categories[idx]._collapsed ? 'none' : '';
-        btn.textContent = categories[idx]._collapsed ? '▼ Show' : '▲ Hide';
-        saveCategories();
-    });
-
+    // ── Delete category ──────────────────────────────────────────────────────
     section.querySelector('.delete-category-btn').addEventListener('click', () => {
         if (confirm(`Delete category "${cat.name}"?`)) {
             categories.splice(idx, 1);
@@ -174,15 +205,59 @@ function buildCategoryEl(cat, idx) {
         }
     });
 
+    // ── Run category ─────────────────────────────────────────────────────────
     section.querySelector('.run-category-btn').addEventListener('click', async () => {
         showStatus('run-status-message', `▶ Running [${cat.name}]...`, 'info');
         await window.api.runCategory(idx);
     });
 
-    section.querySelector('.cat-enable-summary').addEventListener('change', (e) => {
-        section.querySelector('.cat-summary-mode').disabled = !e.target.checked;
+    // ── A: Summary mode cycle pill ────────────────────────────────────────────
+    const SUMMARY_MODES  = ['off', 'minimal', 'normal'];
+    const SUMMARY_LABELS = { off: '✨ Summarise: Off', minimal: '✨ Minimal', normal: '📋 Normal' };
+    section.querySelector('.cat-badge-summarise').addEventListener('click', () => {
+        const current  = categories[idx].categorySummaryMode || 'off';
+        const next     = SUMMARY_MODES[(SUMMARY_MODES.indexOf(current) + 1) % SUMMARY_MODES.length];
+        categories[idx].categorySummaryMode  = next;
+        categories[idx].enableCategorySummary = (next !== 'off');
+
+        const btn = section.querySelector('.cat-badge-summarise');
+        btn.textContent = SUMMARY_LABELS[next];
+        btn.setAttribute('data-mode', next);
+        SUMMARY_MODES.forEach(m => btn.classList.remove(`cat-badge-mode-${m}`));
+        btn.classList.add(`cat-badge-mode-${next}`);
+        btn.classList.toggle('is-on', next !== 'off');
+
+        saveCategories();
     });
 
+    // ── Fact check / Glossary — immediate save on change ──────────────────────
+    section.querySelector('.cat-fact-check').addEventListener('change', (e) => {
+        categories[idx].enableFactCheck = e.target.checked;
+        saveCategories();
+    });
+    section.querySelector('.cat-glossary').addEventListener('change', (e) => {
+        categories[idx].enableGlossary = e.target.checked;
+        saveCategories();
+    });
+
+    // ── B: Extra emails toggle + auto-save on blur ────────────────────────────
+    section.querySelector('.cat-extra-emails-toggle').addEventListener('change', (e) => {
+        categories[idx].enableExtraEmails = e.target.checked;
+        section.querySelector('.cat-extra-emails').disabled = !e.target.checked;
+        saveCategories();
+    });
+    section.querySelector('.cat-extra-emails').addEventListener('blur', (e) => {
+        categories[idx].extraEmails = e.target.value.trim();
+        saveCategories();
+    });
+
+    // ── C: Summary prompt — auto-save on blur ────────────────────────────────
+    section.querySelector('.cat-summary-prompt').addEventListener('blur', (e) => {
+        categories[idx].summaryPrompt = e.target.value.trim();
+        saveCategories();
+    });
+
+    // ── Add profile (with duplicate check) ───────────────────────────────────
     section.querySelector('.add-profile-btn').addEventListener('click', () => {
         const input = section.querySelector('.new-profile-url');
         const url = input.value.trim();
@@ -191,29 +266,24 @@ function buildCategoryEl(cat, idx) {
             return;
         }
         if (!categories[idx].profiles) categories[idx].profiles = [];
+        // Duplicate check
+        if (categories[idx].profiles.some(p => p.url === url)) {
+            alert('This profile is already in the category.');
+            return;
+        }
         categories[idx].profiles.push({
             url, isActive: true, enableAiSummary: false,
             scrapeRetweets: true, scrapeReplies: false
         });
         input.value = '';
+        // Auto-expand so user can see the new profile
+        categories[idx].isExpanded = true;
+        section.querySelector('.category-body').style.display = '';
+        section.querySelector('.collapse-icon').textContent = '▼';
         section.querySelector('.profiles-list').innerHTML =
             categories[idx].profiles.map((p, pi) => buildProfileHtml(p, pi)).join('');
         bindProfileListeners(section, idx);
         saveCategories();
-    });
-
-    section.querySelector('.save-category-btn').addEventListener('click', () => {
-        categories[idx] = {
-            ...categories[idx],
-            enableCategorySummary: section.querySelector('.cat-enable-summary').checked,
-            categorySummaryMode: section.querySelector('.cat-summary-mode').value,
-            enableFactCheck: section.querySelector('.cat-fact-check').checked,
-            enableGlossary: section.querySelector('.cat-glossary').checked,
-            extraEmails: section.querySelector('.cat-extra-emails').value.trim(),
-            summaryPrompt: section.querySelector('.cat-summary-prompt').value.trim(),
-        };
-        saveCategories();
-        showStatus('status-message', `✅ Category "${cat.name}" saved.`, 'success');
     });
 
     bindProfileListeners(section, idx);
@@ -356,7 +426,11 @@ function bindEventListeners() {
         const name = nameInput.value.trim();
         if (!name) return;
         categories.push({
-            name, isActive: true, profiles: [],
+            id: 'cat_' + Date.now(),
+            name,
+            isActive: true,
+            isExpanded: false,   // start collapsed, user clicks to expand
+            profiles: [],
             enableCategorySummary: false, categorySummaryMode: 'minimal',
             enableFactCheck: true, enableGlossary: true,
             extraEmails: '', summaryPrompt: ''
@@ -405,13 +479,41 @@ function bindEventListeners() {
 
     // Import
     document.getElementById('import-btn').addEventListener('click', async () => {
-        const result = await window.api.importConfig();
-        if (result.success) {
+        let result;
+        try {
+            result = await window.api.importConfig();
+        } catch (err) {
+            showStatus('status-message', `❌ Import failed: ${err.message}`, 'error');
+            return;
+        }
+
+        if (!result) {
+            showStatus('status-message', '❌ Import returned no response.', 'error');
+            return;
+        }
+
+        if (result.cancelled) {
+            // User dismissed the file picker — no action needed
+            return;
+        }
+
+        if (!result.success) {
+            showStatus('status-message', `❌ Import failed: ${result.error || 'Unknown error'}`, 'error');
+            return;
+        }
+
+        // Success — update local state and re-render
+        categories = result.data.categories || [];
+        renderCategories();
+
+        if (result.settingsImported !== false) {
+            // Full desktop-app export: also reload settings fields
             settings = result.data.settings || {};
-            categories = result.data.categories || [];
             loadSettingsIntoUI(settings);
-            renderCategories();
-            showStatus('status-message', '✅ Config imported successfully.', 'success');
+            showStatus('status-message', `✅ Config imported (${categories.length} categories + settings).`, 'success');
+        } else {
+            // Legacy Chrome extension export: categories only — don't wipe the settings UI
+            showStatus('status-message', `✅ Categories imported (${categories.length}). Settings were not in the file — your existing settings are unchanged.`, 'success');
         }
     });
 }

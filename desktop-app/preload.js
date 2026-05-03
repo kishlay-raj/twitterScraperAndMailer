@@ -37,4 +37,23 @@ contextBridge.exposeInMainWorld('api', {
     // ── Import / Export ─────────────────────────────────────────────────────
     exportConfig: () => ipcRenderer.invoke('export-config'),
     importConfig: () => ipcRenderer.invoke('import-config'),
+
+    // ── Login Status Events ──────────────────────────────────────────────────
+    // removeAllListeners() before re-adding prevents listener accumulation
+    // if the renderer page is ever reloaded (e.g. via devtools).
+    /** Called when the scraper detects X.com is not logged in. */
+    onLoginRequired: (cb) => {
+        ipcRenderer.removeAllListeners('login-required');
+        ipcRenderer.on('login-required', (_e, payload) => cb(payload));
+    },
+    /** Called when the scraper detects login was completed. */
+    onLoginResolved: (cb) => {
+        ipcRenderer.removeAllListeners('login-resolved');
+        ipcRenderer.on('login-resolved', (_e, payload) => cb(payload));
+    },
+    /** Called when the 20-minute login wait timed out. */
+    onLoginTimeout: (cb) => {
+        ipcRenderer.removeAllListeners('login-timeout');
+        ipcRenderer.on('login-timeout', (_e, payload) => cb(payload));
+    },
 });

@@ -115,6 +115,24 @@
       </div>
     </section>
   </div>
+    <!-- ── Login Required Modal ──────────────────────────────────────────── -->
+    <div id="login-modal" class="login-modal-overlay" style="display:none;" aria-modal="true" role="dialog">
+      <div class="login-modal-card">
+        <div class="login-modal-icon">🔐</div>
+        <h2 class="login-modal-title">Not Logged in to X.com</h2>
+        <p class="login-modal-body">
+          The scraper detected that you're <strong>not logged in</strong>.<br>
+          Please log into X.com in the Chromium browser window, then click <strong>Run Now</strong> again.
+        </p>
+        <div class="login-modal-steps">
+          <div class="login-step">1. Switch to the Chromium window that opened</div>
+          <div class="login-step">2. Log in to X.com as normal</div>
+          <div class="login-step">3. Come back here and click <strong>Run Now</strong></div>
+        </div>
+        <button id="login-modal-dismiss" class="login-modal-dismiss-btn">Got it — I'll log in</button>
+      </div>
+    </div>
+
   <script src="renderer.js"></script>
 </body>
 </html>

@@ -13,10 +13,53 @@
 const store = require('./store');
 const logger = require('./logger');
 const scraperRunner = require('./scraper-runner');
+const browserPool = require('./browser-pool');
 const { summarizeTweets } = require('../shared/llm_api');
 const { sendEmailPayload } = require('../shared/email_api');
+const { app } = require('electron');
+const path = require('path');
 
 let isRunning = false;
+
+// Injected by main.js so the orchestrator can push events to the renderer
+let _notifyRenderer = null;
+function setNotifyRenderer(fn) { _notifyRenderer = fn; }
+
+// ─── Login Gate ──────────────────────────────────────────────────────────────
+
+/**
+ * Checks whether X.com is logged in before proceeding.
+ * This is a one-shot check — no polling, no waiting.
+ *
+ * If not logged in:
+ *   1. Logs a clear message.
+ *   2. Notifies the renderer to show a "Please log in" modal.
+ *   3. Returns false immediately — scraping is aborted.
+ *
+ * The user must log into X.com in the browser window and then
+ * manually click "Run Now" again.
+ *
+ * @param {Function} addLog
+ * @returns {Promise<boolean>} true = logged in, false = not logged in (aborted)
+ */
+async function _ensureLoggedIn(addLog) {
+    const userDataDir = path.join(app.getPath('userData'), 'chrome-session');
+
+    let loggedIn;
+    try {
+        loggedIn = await browserPool.checkLoginStatus(userDataDir);
+    } catch (err) {
+        addLog(`⚠️ Could not reach X.com to verify login: ${err.message}. Scrape aborted.`, 'error');
+        return false;
+    }
+
+    if (loggedIn) return true;
+
+    // Not logged in — notify and stop immediately.
+    addLog('🔐 Not logged in to X.com. Please log in via the browser window and click Run Now again.', 'warn');
+    if (_notifyRenderer) _notifyRenderer('login-required', {});
+    return false;
+}
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
@@ -32,6 +75,10 @@ async function runAllCategories(addLog = logger.add.bind(logger)) {
     isRunning = true;
 
     try {
+        // ── Login gate: abort/wait if not logged in ────────────────────────
+        const loggedIn = await _ensureLoggedIn(addLog);
+        if (!loggedIn) return;
+
         const categories = store.get('categories') || [];
         const active = categories.filter(c => c.isActive !== false);
 
@@ -64,13 +111,30 @@ async function runAllCategories(addLog = logger.add.bind(logger)) {
  * @param {Function} [addLog]
  */
 async function runSingleCategory(categoryIndex, addLog = logger.add.bind(logger)) {
-    const categories = store.get('categories') || [];
-    const cat = categories[categoryIndex];
-    if (!cat) {
-        addLog(`❌ Category index ${categoryIndex} not found.`, 'error');
+    // Guard: don't allow a single-category run to race with a full run
+    // (especially during a login-wait polling loop)
+    if (isRunning) {
+        addLog('⚠️ A scrape run is already in progress. Skipping single-category run.', 'warn');
         return;
     }
-    await _runCategory(categoryIndex, cat, addLog);
+    isRunning = true;
+
+    try {
+        const categories = store.get('categories') || [];
+        const cat = categories[categoryIndex];
+        if (!cat) {
+            addLog(`❌ Category index ${categoryIndex} not found.`, 'error');
+            return;
+        }
+
+        // ── Login gate ────────────────────────────────────────────────────
+        const loggedIn = await _ensureLoggedIn(addLog);
+        if (!loggedIn) return;
+
+        await _runCategory(categoryIndex, cat, addLog);
+    } finally {
+        isRunning = false;
+    }
 }
 
 // ─── Internal ────────────────────────────────────────────────────────────────
@@ -444,4 +508,4 @@ function _buildEmailShell(categoryName, partLabel, profileBlocks) {
     return header + profileBlocks.join('') + footer;
 }
 
-module.exports = { runAllCategories, runSingleCategory };
+module.exports = { runAllCategories, runSingleCategory, setNotifyRenderer };

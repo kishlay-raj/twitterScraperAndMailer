@@ -770,3 +770,105 @@ button { font-family: inherit; cursor: pointer; transition: all var(--transition
 /* Log entry error / warn colouring */
 .log-entry.log-error .log-message { color: #f87171; }
 .log-entry.log-warn  .log-message { color: #fbbf24; }
+
+/* ── Login Required Modal ────────────────────────────────────── */
+.login-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.72);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: loginFadeIn 0.25s ease;
+}
+
+@keyframes loginFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.login-modal-card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 36px 40px;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.25);
+  text-align: center;
+  animation: loginSlideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes loginSlideUp {
+  from { transform: translateY(24px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.login-modal-icon {
+  font-size: 3rem;
+  margin-bottom: 12px;
+  line-height: 1;
+}
+
+.login-modal-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--gray-900);
+  margin: 0 0 10px;
+  text-transform: none;
+  letter-spacing: -0.3px;
+}
+
+.login-modal-body {
+  font-size: 0.85rem;
+  color: var(--gray-500);
+  line-height: 1.65;
+  margin: 0 0 18px;
+}
+
+.login-modal-body strong { color: var(--gray-900); }
+
+/* Numbered step list */
+.login-modal-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 22px;
+  text-align: left;
+}
+
+.login-step {
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  padding: 9px 13px;
+  font-size: 0.8rem;
+  color: var(--gray-600);
+  font-weight: 500;
+}
+
+.login-step strong { color: var(--primary); }
+
+/* Dismiss button */
+.login-modal-dismiss-btn {
+  width: 100%;
+  padding: 11px;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all var(--transition);
+  letter-spacing: 0.1px;
+}
+
+.login-modal-dismiss-btn:hover {
+  background: linear-gradient(135deg, var(--primary-dark), #4338ca);
+  box-shadow: 0 4px 14px rgba(99,102,241,0.3);
+  transform: translateY(-1px);
+}

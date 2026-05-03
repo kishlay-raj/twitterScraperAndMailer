@@ -8,6 +8,14 @@
  * between runs — you only need to log in once.
  */
 
+// URLs that indicate X.com redirected us to the login / sign-up wall
+const LOGIN_URL_PATTERNS = [
+    'x.com/i/flow/login',
+    'x.com/login',
+    'twitter.com/login',
+    'x.com/i/flow/signup',
+];
+
 const puppeteer = require('puppeteer');
 
 let browser = null;
@@ -30,6 +38,7 @@ async function launch(userDataDir) {
     isLaunching = true;
     try {
         browser = await puppeteer.launch({
+            executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
             headless: false,           // Visible so X can detect genuine browser activity
             userDataDir,               // Persist cookies — login once, works forever
             args: [
@@ -99,10 +108,42 @@ async function close() {
 }
 
 /**
+ * Check whether the stored X.com session is still valid.
+ *
+ * Opens a temporary page, navigates to x.com/home, and inspects the
+ * final URL. If X redirects us to the login flow the session has expired.
+ *
+ * @param {string} userDataDir - Needed to relaunch the browser if it died
+ * @returns {Promise<boolean>} true = logged in, false = needs login
+ */
+async function checkLoginStatus(userDataDir) {
+    let page = null;
+    try {
+        page = await newPage(userDataDir);
+        await page.goto('https://x.com/home', {
+            waitUntil: 'domcontentloaded',
+            timeout: 20000,
+        });
+        const finalUrl = page.url();
+        const isLoggedOut = LOGIN_URL_PATTERNS.some(p => finalUrl.includes(p));
+        return !isLoggedOut;
+    } catch (err) {
+        console.warn('[BrowserPool] Login check failed:', err.message);
+        // If we can't even load the page treat it as logged-out so the
+        // user has a chance to fix their connection before scraping starts.
+        return false;
+    } finally {
+        if (page) {
+            try { await page.close(); } catch (_) { }
+        }
+    }
+}
+
+/**
  * Get the raw Puppeteer browser instance (for advanced use).
  */
 function getBrowser() {
     return browser;
 }
 
-module.exports = { launch, newPage, close, getBrowser };
+module.exports = { launch, newPage, close, getBrowser, checkLoginStatus };
