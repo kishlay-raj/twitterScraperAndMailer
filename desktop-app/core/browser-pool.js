@@ -17,6 +17,7 @@ const LOGIN_URL_PATTERNS = [
 ];
 
 const puppeteer = require('puppeteer');
+const { app }   = require('electron'); // needed to reclaim focus after newPage()
 
 let browser = null;
 let isLaunching = false;
@@ -122,6 +123,7 @@ async function checkLoginStatus(userDataDir) {
     let page = null;
     try {
         page = await newPage(userDataDir);
+        app.focus({ steal: true }); // reclaim focus — Chrome steals it on every new tab
         await page.goto('https://x.com/home', {
             waitUntil: 'domcontentloaded',
             timeout: 45000, // 45s — generous for cold starts / slow connections
