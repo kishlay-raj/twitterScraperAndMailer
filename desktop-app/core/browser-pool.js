@@ -16,7 +16,9 @@ const LOGIN_URL_PATTERNS = [
     'x.com/i/flow/signup',
 ];
 
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteer.use(StealthPlugin());
 
 let browser = null;
 let isLaunching = false;
@@ -127,15 +129,35 @@ async function newPage(userDataDir) {
     // Without this, addScriptTag throws a CSP violation and the scraper never runs.
     await page.setBypassCSP(true);
 
-    // Mask automation flags to reduce X bot detection
+    // ── Extra anti-detection hardening (on top of puppeteer-extra-plugin-stealth) ──
     await page.evaluateOnNewDocument(() => {
-        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        // Fake permissions API for notification checks
+        const originalQuery = window.navigator.permissions?.query;
+        if (originalQuery) {
+            window.navigator.permissions.query = (parameters) =>
+                parameters.name === 'notifications'
+                    ? Promise.resolve({ state: Notification.permission })
+                    : originalQuery(parameters);
+        }
+
+        // Ensure window.chrome looks real (stealth covers runtime, but
+        // some detectors check for chrome.app and chrome.csi too)
+        if (!window.chrome) window.chrome = {};
+        if (!window.chrome.app) {
+            window.chrome.app = {
+                isInstalled: false,
+                InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+                RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
+            };
+        }
+        if (!window.chrome.csi) window.chrome.csi = () => ({});
+        if (!window.chrome.loadTimes) window.chrome.loadTimes = () => ({});
     });
 
-    // Set a realistic user agent
+    // Set a realistic, current-era user agent
     await page.setUserAgent(
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
-        '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+        '(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
     );
 
     return page;
@@ -192,4 +214,68 @@ function getBrowser() {
     return browser;
 }
 
-module.exports = { launch, newPage, close, getBrowser, checkLoginStatus, restartWithMode };
+/**
+ * Open a visible Chrome window on x.com/login so the user can log in.
+ *
+ * If the browser is currently in headless mode, it temporarily restarts
+ * in visible mode. When the login tab is closed, it reverts back to
+ * the original mode.
+ *
+ * @param {string} userDataDir - Chrome user data directory
+ * @returns {Promise<void>}
+ */
+async function openLoginPage(userDataDir) {
+    const wasHeadless = currentHeadless;
+
+    // Must be visible for the user to interact
+    if (currentHeadless) {
+        console.log('[BrowserPool] Switching to visible mode for login...');
+        await close();
+        await launch(userDataDir, false);
+    }
+
+    // Open a new page WITHOUT minimizing it (skip the CDP minimize logic)
+    if (!browser) {
+        await launch(userDataDir, false);
+    }
+    const page = await browser.newPage();
+
+    // Still apply stealth and CSP bypass
+    await page.setBypassCSP(true);
+    await page.setUserAgent(
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
+        '(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+    );
+
+    // Bring the window to the foreground (un-minimize)
+    try {
+        const session = await page.createCDPSession();
+        const { windowId } = await session.send('Browser.getWindowForTarget');
+        await session.send('Browser.setWindowBounds', {
+            windowId,
+            bounds: { windowState: 'normal' },
+        });
+        await session.detach();
+    } catch (e) {
+        console.warn('[BrowserPool] Could not un-minimize window:', e.message);
+    }
+
+    await page.goto('https://x.com/login', {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000,
+    });
+
+    console.log('[BrowserPool] Login page opened — waiting for user to log in and close the tab...');
+
+    // When the user closes the login tab, revert to original mode
+    page.once('close', async () => {
+        console.log('[BrowserPool] Login tab closed by user.');
+        if (wasHeadless) {
+            console.log('[BrowserPool] Reverting to headless mode...');
+            await close();
+            await launch(userDataDir, true);
+        }
+    });
+}
+
+module.exports = { launch, newPage, close, getBrowser, checkLoginStatus, restartWithMode, openLoginPage };

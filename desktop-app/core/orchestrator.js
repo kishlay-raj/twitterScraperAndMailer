@@ -14,6 +14,7 @@ const store = require('./store');
 const logger = require('./logger');
 const scraperRunner = require('./scraper-runner');
 const browserPool = require('./browser-pool');
+const idleDetect = require('./idle-detect');
 const { summarizeTweets } = require('../shared/llm_api');
 const { sendEmailPayload } = require('../shared/email_api');
 const { app } = require('electron');
@@ -25,6 +26,41 @@ let cancelRequested = false;
 // Injected by main.js so the orchestrator can push events to the renderer
 let _notifyRenderer = null;
 function setNotifyRenderer(fn) { _notifyRenderer = fn; }
+
+// ─── Smart Browser Mode ─────────────────────────────────────────────────────
+
+/**
+ * If the user has chosen "Smart (Auto)" browser mode, detect whether the
+ * laptop is idle (no keyboard/mouse for 5+ minutes) and switch the browser
+ * to the optimal mode:
+ *
+ *   - User IDLE  → visible browser (less bot detection, session stays alive)
+ *   - User ACTIVE → headless browser (no window disturbance)
+ *
+ * For "always-headless" or "always-visible" this is a no-op.
+ *
+ * @param {Function} addLog
+ */
+async function _applySmartBrowserMode(addLog) {
+    const settings = store.get('settings') || {};
+    const mode = settings.browserMode || 'headless'; // 'headless' | 'visible' | 'smart'
+
+    if (mode !== 'smart') return; // Static mode — nothing to do
+
+    const userDataDir = path.join(app.getPath('userData'), 'chrome-session');
+    const { isIdle, idleSeconds } = await idleDetect.checkIdle();
+
+    // idle → visible (false), active → headless (true)
+    const wantHeadless = !isIdle;
+
+    const idleLabel = isIdle
+        ? `idle for ${Math.round(idleSeconds / 60)}m → using visible browser`
+        : `active (idle ${idleSeconds}s) → using headless browser`;
+
+    addLog(`🧠 Smart Mode: ${idleLabel}`, 'info');
+
+    await browserPool.restartWithMode(userDataDir, wantHeadless);
+}
 
 // ─── Login Gate ──────────────────────────────────────────────────────────────
 
@@ -77,6 +113,9 @@ async function runAllCategories(addLog = logger.add.bind(logger)) {
     cancelRequested = false;
 
     try {
+        // ── Smart browser mode: switch headless/visible based on idle state
+        await _applySmartBrowserMode(addLog);
+
         // ── Login gate: abort/wait if not logged in ────────────────────────
         const loggedIn = await _ensureLoggedIn(addLog);
         if (!loggedIn) return;
@@ -138,6 +177,9 @@ async function runSingleCategory(categoryIndex, addLog = logger.add.bind(logger)
             addLog(`❌ Category index ${categoryIndex} not found.`, 'error');
             return;
         }
+
+        // ── Smart browser mode ───────────────────────────────────────────
+        await _applySmartBrowserMode(addLog);
 
         // ── Login gate ────────────────────────────────────────────────────
         const loggedIn = await _ensureLoggedIn(addLog);
@@ -234,7 +276,9 @@ async function _runCategory(categoryIndex, category, addLog) {
                 tweets: novelTweets
             });
 
-            await new Promise(r => setTimeout(r, 500)); // polite delay between profiles
+            // Random 2-5s delay between profiles to appear human-like and avoid bot detection
+            const interProfileDelay = 2000 + Math.floor(Math.random() * 3000);
+            await new Promise(r => setTimeout(r, interProfileDelay));
 
         } catch (err) {
             addLog(`[${category.name}] ⚠️ Error scraping ${profile.url}: ${err.message}`, 'error');

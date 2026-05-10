@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('api', {
     runCategory: (categoryIndex) => ipcRenderer.invoke('run-category', categoryIndex),
     stopRun: () => ipcRenderer.invoke('stop-run'),
     getRunStatus: () => ipcRenderer.invoke('get-run-status'),
+    openLogin: () => ipcRenderer.invoke('open-login'),
 
     // ── Import / Export ─────────────────────────────────────────────────────
     exportConfig: () => ipcRenderer.invoke('export-config'),

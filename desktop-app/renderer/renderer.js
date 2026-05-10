@@ -49,15 +49,40 @@ async function init() {
     // ── Login Required modal ─────────────────────────────────────────────────
     const loginModal = document.getElementById('login-modal');
     const dismissBtn = document.getElementById('login-modal-dismiss');
+    const openLoginBtn = document.getElementById('login-modal-open');
 
     // Show the modal when the backend detects no active session
     window.api.onLoginRequired(() => {
         loginModal.style.display = 'flex';
     });
 
-    // Dismiss button closes the modal so the user can go log in
+    // Dismiss button closes the modal
     dismissBtn.addEventListener('click', () => {
         loginModal.style.display = 'none';
+    });
+
+    // Open Login Page button directly triggers the login flow and closes modal
+    openLoginBtn.addEventListener('click', async () => {
+        loginModal.style.display = 'none';
+        
+        // Disable the main login button to show state
+        const mainLoginBtn = document.getElementById('login-btn');
+        if (mainLoginBtn) {
+            mainLoginBtn.disabled = true;
+            mainLoginBtn.textContent = '⏳ Opening...';
+        }
+        
+        try {
+            await window.api.openLogin();
+            showStatus('run-status-message', '🔐 Chrome opened — please log in to X.com, then close the tab.', 'info');
+        } catch (err) {
+            showStatus('run-status-message', `❌ Failed to open login: ${err.message}`, 'error');
+        } finally {
+            if (mainLoginBtn) {
+                mainLoginBtn.disabled = false;
+                mainLoginBtn.textContent = '🔐 Login to X';
+            }
+        }
     });
 }
 
@@ -73,7 +98,9 @@ function loadSettingsIntoUI(s) {
     document.getElementById('allow-duplicates').checked = !!s.allowDuplicates;
     document.getElementById('enable-schedule').checked = !!s.enableSchedule;
     document.getElementById('schedule-time').value = s.scheduleTime || '';
-    document.getElementById('headless-mode').checked = s.headlessMode !== false; // default true
+    // Browser mode: migrate from old boolean headlessMode to new tri-state
+    const browserMode = s.browserMode || (s.headlessMode !== false ? 'headless' : 'visible');
+    document.getElementById('browser-mode').value = browserMode;
 }
 
 function collectSettingsFromUI() {
@@ -87,7 +114,7 @@ function collectSettingsFromUI() {
         allowDuplicates: document.getElementById('allow-duplicates').checked,
         enableSchedule: document.getElementById('enable-schedule').checked,
         scheduleTime: document.getElementById('schedule-time').value,
-        headlessMode: document.getElementById('headless-mode').checked,
+        browserMode: document.getElementById('browser-mode').value,
     };
 }
 
@@ -433,6 +460,22 @@ function bindEventListeners() {
         stopBtn.textContent = '⏳ Stopping...';
         await window.api.stopRun();
         showStatus('run-status-message', '🛑 Stop requested — finishing current profile...', 'info');
+    });
+
+    // Login to X
+    const loginBtn = document.getElementById('login-btn');
+    loginBtn.addEventListener('click', async () => {
+        loginBtn.disabled = true;
+        loginBtn.textContent = '⏳ Opening...';
+        try {
+            await window.api.openLogin();
+            showStatus('run-status-message', '🔐 Chrome opened — please log in to X.com, then close the tab.', 'info');
+        } catch (err) {
+            showStatus('run-status-message', `❌ Failed to open login: ${err.message}`, 'error');
+        } finally {
+            loginBtn.disabled = false;
+            loginBtn.textContent = '🔐 Login to X';
+        }
     });
 
     // Save Settings

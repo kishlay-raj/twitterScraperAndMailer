@@ -57,19 +57,19 @@ async function scrapeProfile(url, globalProcessedIds = [], settings = {}, addLog
             addLog(message, 'info');
         });
 
-        // Inject a mock chrome.runtime.sendMessage so the scraper source works unchanged
+        // Inject a mock chrome.runtime.sendMessage so the scraper source works unchanged.
+        // IMPORTANT: Do NOT overwrite window.chrome — the stealth plugin sets up
+        // chrome.app, chrome.csi, chrome.loadTimes to pass bot detection. Merge only.
         await page.evaluateOnNewDocument(() => {
             window.__bgLog = window.__bgLog || (() => {}); // polyfill in case of timing
-            window.chrome = {
-                runtime: {
-                    sendMessage: (msg) => {
-                        if (msg && msg.action === 'log' && msg.message) {
-                            window.__bgLog(msg.message);
-                        }
-                    },
-                    lastError: null
+            if (!window.chrome) window.chrome = {};
+            if (!window.chrome.runtime) window.chrome.runtime = {};
+            window.chrome.runtime.sendMessage = (msg) => {
+                if (msg && msg.action === 'log' && msg.message) {
+                    window.__bgLog(msg.message);
                 }
             };
+            window.chrome.runtime.lastError = null;
         });
 
         // Navigate to the profile.

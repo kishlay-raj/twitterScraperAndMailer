@@ -8,13 +8,14 @@
  * - Bootstraps the scheduler and browser pool on startup
  */
 
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, powerSaveBlocker } = require('electron');
 const path = require('path');
 const store = require('./core/store');
 const logger = require('./core/logger');
 const scheduler = require('./core/scheduler');
 const browserPool = require('./core/browser-pool');
 const orchestrator = require('./core/orchestrator');
+const idleDetect = require('./core/idle-detect');
 
 let mainWindow = null;
 let tray = null;
@@ -122,15 +123,24 @@ function registerIpcHandlers() {
         // Re-apply the schedule whenever settings are saved
         scheduler.updateSchedule(settings, () => orchestrator.runAllCategories());
 
-        // If headless mode changed, restart the browser pool
-        const oldHeadless = oldSettings.headlessMode !== false; // default true
-        const newHeadless = settings.headlessMode !== false;     // default true
-        if (oldHeadless !== newHeadless) {
+        // If browser mode changed, restart the browser pool
+        const oldMode = oldSettings.browserMode || (oldSettings.headlessMode !== false ? 'headless' : 'visible');
+        const newMode = settings.browserMode || 'headless';
+        if (oldMode !== newMode) {
             const userDataDir = path.join(app.getPath('userData'), 'chrome-session');
-            browserPool.restartWithMode(userDataDir, newHeadless).catch(err => {
+            let headless;
+            if (newMode === 'smart') {
+                // Smart mode: determine based on current idle state
+                const { isIdle } = await idleDetect.checkIdle();
+                headless = !isIdle;
+                logger.add(`🧠 Smart Mode activated. Currently ${isIdle ? 'idle → visible' : 'active → headless'}.`, 'info');
+            } else {
+                headless = newMode !== 'visible';
+            }
+            browserPool.restartWithMode(userDataDir, headless).catch(err => {
                 logger.add(`⚠️ Browser restart failed: ${err.message}`, 'error');
             });
-            logger.add(`🔄 Browser mode changed to ${newHeadless ? 'headless' : 'visible'}.`, 'info');
+            logger.add(`🔄 Browser mode changed to ${newMode}.`, 'info');
         }
         return { success: true };
     });
@@ -181,6 +191,19 @@ function registerIpcHandlers() {
     // Run status (is a scrape currently running?)
     ipcMain.handle('get-run-status', async () => {
         return { isRunning: orchestrator.getIsRunning() };
+    });
+
+    // Open Login Page (visible browser for X.com login)
+    ipcMain.handle('open-login', async () => {
+        const userDataDir = path.join(app.getPath('userData'), 'chrome-session');
+        try {
+            logger.add('🔐 Opening X.com login page in visible browser...', 'info');
+            await browserPool.openLoginPage(userDataDir);
+            return { success: true };
+        } catch (err) {
+            logger.add(`❌ Failed to open login page: ${err.message}`, 'error');
+            return { success: false, error: err.message };
+        }
     });
 
     // Import / Export config
@@ -269,6 +292,13 @@ function registerIpcHandlers() {
 // ─── App Lifecycle ───────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
+    // ── Prevent macOS App Nap ────────────────────────────────────────────────
+    // When the window is hidden (minimized to tray), macOS suspends the app
+    // and freezes ALL timers — including node-cron. This prevents scheduled
+    // runs from ever firing. powerSaveBlocker keeps the process alive.
+    const blockerId = powerSaveBlocker.start('prevent-app-suspension');
+    console.log(`[Main] powerSaveBlocker started (id=${blockerId}) — App Nap disabled.`);
+
     // Set up data store, logger, and IPC
     store.init(app.getPath('userData'));
     logger.init(app.getPath('userData'), (logEntry) => {
@@ -288,9 +318,16 @@ app.whenReady().then(async () => {
     // Launch the shared Puppeteer browser instance
     const userDataDir = path.join(app.getPath('userData'), 'chrome-session');
     const savedSettings = store.get('settings') || {};
-    const headless = savedSettings.headlessMode !== false; // default true (headless)
+    const browserMode = savedSettings.browserMode || (savedSettings.headlessMode !== false ? 'headless' : 'visible');
+    let headless;
+    if (browserMode === 'smart') {
+        const { isIdle } = await idleDetect.checkIdle();
+        headless = !isIdle;
+    } else {
+        headless = browserMode !== 'visible';
+    }
     await browserPool.launch(userDataDir, headless);
-    logger.add(`🚀 DailyUpdates Desktop started. Browser pool ready (${headless ? 'headless' : 'visible'}).`, 'info');
+    logger.add(`🚀 DailyUpdates Desktop started. Browser pool ready (mode: ${browserMode}, ${headless ? 'headless' : 'visible'}).`, 'info');
 
     // Apply saved schedule
     const settings = store.get('settings') || {};
