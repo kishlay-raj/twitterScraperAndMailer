@@ -19,6 +19,28 @@ const LOGIN_URL_PATTERNS = [
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(StealthPlugin());
+const fs = require('fs');
+const path = require('path');
+
+/**
+ * Remove stale SingletonLock / SingletonCookie files from the Chrome
+ * userDataDir. These are left behind when Chrome crashes or is
+ * force-killed without a clean shutdown, and they prevent any new
+ * Chrome process from launching against the same profile.
+ */
+function _cleanStaleLock(userDataDir) {
+    for (const lockFile of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+        const p = path.join(userDataDir, lockFile);
+        try {
+            if (fs.existsSync(p)) {
+                fs.unlinkSync(p);
+                console.log(`[BrowserPool] Removed stale lock file: ${lockFile}`);
+            }
+        } catch (e) {
+            console.warn(`[BrowserPool] Could not remove ${lockFile}:`, e.message);
+        }
+    }
+}
 
 let browser = null;
 let isLaunching = false;
@@ -42,6 +64,8 @@ async function launch(userDataDir, headless = true) {
     isLaunching = true;
     currentHeadless = headless;
     try {
+        // Remove any stale lock files from a previous crash / unclean shutdown
+        _cleanStaleLock(userDataDir);
         const args = [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -88,6 +112,8 @@ async function restartWithMode(userDataDir, headless) {
     }
     console.log(`[BrowserPool] Restarting browser (headless: ${headless})...`);
     await close();
+    // Give the OS time to fully release the profile directory lock
+    await new Promise(r => setTimeout(r, 1500));
     await launch(userDataDir, headless);
 }
 
@@ -168,10 +194,28 @@ async function newPage(userDataDir) {
  */
 async function close() {
     if (browser) {
+        const proc = browser.process();
         try {
             await browser.close();
         } catch (_) { }
         browser = null;
+
+        // Wait for the Chrome OS process to fully exit so the
+        // SingletonLock file is released before we try to relaunch.
+        if (proc && proc.exitCode === null) {
+            await new Promise((resolve) => {
+                const timeout = setTimeout(() => {
+                    // Force-kill if it hasn't exited after 5 seconds
+                    try { proc.kill('SIGKILL'); } catch (_) { }
+                    resolve();
+                }, 5000);
+                proc.once('exit', () => {
+                    clearTimeout(timeout);
+                    resolve();
+                });
+            });
+            console.log('[BrowserPool] Chrome process fully exited.');
+        }
     }
 }
 
