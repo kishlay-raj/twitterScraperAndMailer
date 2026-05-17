@@ -184,7 +184,8 @@ Start with a single bold sentence giving the big-picture overview.
 Then write exactly these sections using these headers:
 
 ## 📝 Minimal Summary
-Synthesize the tweets into 4–6 concise bullet points (use "- " prefix). Be factual and direct. No fluff.${sectionsInstruction}`;
+Synthesize the tweets into 4–6 concise bullet points (use "- " prefix). Be factual and direct. No fluff.
+CRITICAL FORMATTING INSTRUCTION: Use rich markdown formatting within your bullet points. Liberally use **bold** text to highlight key names, metrics, and core concepts, and use *italics* for emphasis or quotes, ensuring the text can be grasped in seconds.${sectionsInstruction}`;
 
     const normalInstruction = `You are an expert analyst. Summarize the following tweets into a comprehensive, detailed digest.
 
@@ -192,7 +193,8 @@ Start with a single bold sentence giving the big-picture overview.
 Then write exactly this section:
 
 ## 📝 Full Summary
-Provide a detailed bulleted summary (use "- " prefix) that synthesizes all the tweets together. Group related updates, narratives, or events into cohesive points. Be thorough—capture specific details, names, and figures. There is no limit on the number of bullets, but focus on the collective story told by the tweets.${sectionsInstruction}`;
+Provide a detailed bulleted summary (use "- " prefix) that synthesizes all the tweets together. Group related updates, narratives, or events into cohesive points. Be thorough—capture specific details, names, and figures. There is no limit on the number of bullets, but focus on the collective story told by the tweets.
+CRITICAL FORMATTING INSTRUCTION: Ensure exceptional readability by heavily utilizing **bold** text to highlight important entities, numbers, and key takeaways, and *italics* for context, quotes, or nuance. Make it extremely easy to scan quickly.${sectionsInstruction}`;
 
     const defaultInstruction = summaryMode === 'normal' ? normalInstruction : minimalInstruction;
 
