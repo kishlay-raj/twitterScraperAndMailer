@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DailyUpdates Hub</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;max-width:100vw;overflow-x:hidden;position:relative}
+body{font-family:'Inter',sans-serif;background:#f1f5f9;color:#111827;min-height:100vh}
+.header{background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(79,70,229,.3)}
+.header h1{color:#fff;font-size:18px;font-weight:800;letter-spacing:-.3px}
+.header-right{display:flex;gap:8px;align-items:center}
+.btn-icon{background:rgba(255,255,255,.15);border:none;color:#fff;padding:6px 12px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;transition:.2s}
+.btn-icon:hover{background:rgba(255,255,255,.25)}
+.tabs{background:#fff;border-bottom:1px solid #e5e7eb;display:flex;padding:0 24px;gap:4px}
+.tab{padding:12px 16px;border:none;background:none;cursor:pointer;font-size:14px;font-weight:600;color:#6b7280;border-bottom:2px solid transparent;transition:.2s;display:flex;align-items:center;gap:6px}
+.tab.active{color:#6366f1;border-bottom-color:#6366f1}
+.tab .badge{background:#ef4444;color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:10px;min-width:18px;text-align:center}
+.tab .badge.zero{display:none}
+.main{max-width:760px;margin:0 auto;padding:20px 16px;width:100%;box-sizing:border-box}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;align-items:center;width:100%;max-width:100%;box-sizing:border-box}
+.chip{background:#fff;border:1px solid #e5e7eb;padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;transition:.15s;color:#374151}
+.chip.active,.chip:hover{background:#6366f1;color:#fff;border-color:#6366f1}
+.chip-label{font-size:12px;color:#6b7280;font-weight:600;margin-right:4px}
+.toggle-unread{display:flex;align-items:center;gap:6px;margin-left:auto;font-size:12px;font-weight:600;color:#6b7280;cursor:pointer}
+.toggle-unread input{cursor:pointer;accent-color:#6366f1}
+.card{background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:12px;overflow:hidden;border-left:3px solid transparent;transition:.2s}
+.card.unread{border-left-color:#6366f1}
+.card.read{opacity:.75}
+.card-header{padding:14px 16px 0;display:flex;justify-content:space-between;align-items:flex-start}
+.card-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.unread-dot{width:8px;height:8px;border-radius:50%;background:#6366f1;flex-shrink:0}
+.read-dot{width:8px;height:8px;border-radius:50%;border:2px solid #d1d5db;flex-shrink:0}
+.cat-badge{background:#ede9fe;color:#6d28d9;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px}
+.proj-badge{background:#fef3c7;color:#92400e;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px}
+.ts{font-size:11px;color:#9ca3af}
+.mark-read-btn{border:none;background:none;color:#6366f1;font-size:11px;font-weight:600;cursor:pointer;padding:2px 6px;border-radius:6px;transition:.15s;white-space:nowrap}
+.mark-read-btn:hover{background:#ede9fe}
+.card-body{padding:12px 16px;word-break:break-word;overflow-wrap:break-word}
+.brief-overview{font-size:14px;font-weight:700;color:#111827;margin-bottom:8px;line-height:1.4}
+.brief-bullets{list-style:none;padding:0;margin:0}
+.brief-bullets li{font-size:13px;color:#374151;line-height:1.6;padding:2px 0 2px 16px;position:relative}
+.brief-bullets li::before{content:"•";position:absolute;left:4px;color:#6366f1;font-weight:700}
+.card-actions{padding:10px 16px 14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid #f3f4f6}
+.btn-expand{background:#f5f3ff;border:1px solid #ddd6fe;color:#6d28d9;font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px;cursor:pointer;transition:.15s}
+.btn-expand:hover{background:#ede9fe}
+.glossary-chips{display:flex;gap:4px;flex-wrap:wrap}
+.g-chip{background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;font-size:11px;font-weight:600;padding:3px 8px;border-radius:8px;cursor:pointer;position:relative;transition:.15s}
+.g-chip:hover{background:#dcfce7}
+.g-tip{display:none;position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:#1f2937;color:#f9fafb;font-size:12px;padding:8px 12px;border-radius:8px;width:220px;z-index:200;line-height:1.5;box-shadow:0 4px 12px rgba(0,0,0,.2);white-space:normal;font-weight:400}
+.g-tip::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:#1f2937}
+.g-chip:hover .g-tip,.g-chip.tip-open .g-tip{display:block}
+.deep-section{border-top:1px solid #e5e7eb;padding:14px 16px;background:#fafafa;font-size:13px;color:#374151;line-height:1.7;display:none;word-break:break-word;overflow-wrap:break-word}
+.deep-section.open{display:block}
+.deep-section table{display:block;max-width:100%;overflow-x:auto;white-space:nowrap}
+.deep-section pre{max-width:100%;overflow-x:auto}
+.deep-section strong{color:#111827}
+.deep-section ul{padding-left:18px;margin:6px 0}
+.deep-section li{margin-bottom:3px}
+.profile-block{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-top:12px;overflow:hidden}
+.profile-meta{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.avatar{width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid #e0e7ff}
+.avatar-fallback{width:36px;height:36px;border-radius:50%;background:#6366f1;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0}
+.profile-name{font-weight:700;font-size:13px;color:#111827}
+.profile-handle{font-size:12px;color:#6366f1}
+.tweet-row{border-top:1px solid #f3f4f6;padding:10px 0;font-size:13px;color:#374151;line-height:1.6}
+.tweet-row a{color:#6366f1;text-decoration:none;font-weight:600}
+.tweet-ts{font-size:10px;color:#9ca3af;margin-bottom:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.tweet-badge{font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;display:inline-block}
+.badge-rt{background:#d1fae5;color:#065f46}
+.badge-sub{background:#fce7f3;color:#9d174d}
+.tweet-text{margin:4px 0 6px;word-break:break-word}
+.tweet-reply-ctx{border-left:3px solid #d1d5db;background:#f9fafb;padding:8px 10px;margin-bottom:8px;border-radius:0 6px 6px 0;font-size:12px}
+.tweet-reply-ctx .reply-author{font-size:11px;color:#6b7280;font-weight:600;margin-bottom:3px}
+.tweet-reply-ctx .reply-author span{color:#6366f1}
+.tweet-reply-ctx .reply-text{color:#374151;font-style:italic}
+.tweet-quote{border:1px solid #e0e7ff;border-left:3px solid #6366f1;border-radius:0 8px 8px 0;background:#f8f7ff;padding:8px 12px;margin:6px 0;font-size:12px}
+.tweet-quote .qt-author{font-size:11px;color:#6366f1;font-weight:700;margin-bottom:3px}
+.tweet-quote .qt-text{color:#374151}
+.tweet-media{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+.tweet-media img{max-width:180px;max-height:140px;border-radius:8px;object-fit:cover;border:1px solid #e5e7eb}
+.tweet-link{font-size:12px;color:#6366f1;font-weight:600;text-decoration:none}
+.version-badge{background:#1e1b4b;color:#a5b4fc;font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;font-family:monospace}
+.change-row{display:flex;gap:8px;align-items:baseline;padding:4px 0;font-size:13px}
+.change-type{font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;flex-shrink:0;text-transform:uppercase}
+.type-feat{background:#dcfce7;color:#166534}
+.type-fix{background:#fee2e2;color:#991b1b}
+.type-chore{background:#f3f4f6;color:#374151}
+.type-docs{background:#dbeafe;color:#1e40af}
+.empty{text-align:center;padding:60px 20px;color:#9ca3af;font-size:14px}
+.loading{text-align:center;padding:40px;color:#6b7280;font-size:14px}
+.section-title{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#6d28d9;margin:14px 0 8px;padding-bottom:4px;border-bottom:1px solid #e0e7ff}
+.pane{display:none}
+.pane.active{display:block}
+.date-btn{background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:600;color:#4b5563;cursor:pointer;transition:.15s;}
+.date-btn:hover{background:#f3f4f6;color:#111827;}
+
+/* Mobile Optimizations */
+.cat-filter-scroll { display:flex; gap:8px; flex-wrap:wrap; padding-bottom:4px; width:100%; align-items:center; }
+@media (max-width: 600px) {
+  .header { padding: 12px 16px; }
+  .header h1 { font-size: 16px; }
+  .main { padding: 12px 8px; }
+  .card-header { padding: 16px 16px 0; }
+  .mark-read-btn { padding: 6px 10px; font-size: 12px; }
+  .filters { flex-direction: column; align-items: stretch; gap: 12px; }
+  #filter-controls-right { margin-left: 0 !important; justify-content: space-between; flex-wrap: wrap; width: 100%; box-sizing: border-box; }
+  .date-btn { padding: 6px 12px; }
+  input[type="date"] { flex: 1; min-width: 120px; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🛰️ DailyUpdates Hub</h1>
+  <div class="header-right">
+    <button class="btn-icon" onclick="markAllRead()">✓ All Read</button>
+    <button class="btn-icon" onclick="loadData()">⟳ Refresh</button>
+  </div>
+</div>
+
+
+
+<div class="main">
+  <!-- DIGEST PANE -->
+  <div class="pane active" id="pane-digest" style="display:block;">
+    <div class="filters" id="digest-filters">
+      <div class="cat-filter-scroll">
+        <span class="chip-label">Category:</span>
+        <span class="chip active" data-cat="all" onclick="filterCat(this,'digest')">All</span>
+        <!-- dynamic chips injected here -->
+      </div>
+      <div id="filter-controls-right" style="margin-left:auto; display:flex; gap:12px; align-items:center;">
+        <div style="display:flex; align-items:center; gap:4px;">
+          <button class="date-btn" onclick="stepDate('digest', -1)">◀</button>
+          <button class="date-btn" onclick="stepDate('digest', 0)">Today</button>
+          <button class="date-btn" onclick="stepDate('digest', 1)">▶</button>
+          <input type="date" id="digest-date-filter" onchange="renderDigest()" style="border:1px solid #e5e7eb; border-radius:6px; padding:3px 6px; font-family:inherit; font-size:12px; color:#374151;">
+        </div>
+        <label class="toggle-unread" style="margin-left:0;">
+          <input type="checkbox" id="unread-only-digest" onchange="renderDigest()"> Unread only
+        </label>
+      </div>
+    </div>
+    <div id="digest-feed"><div class="loading">Loading digest...</div></div>
+  </div>
+
+
+
+<script>
+let digestData = [], projectData = [];
+let activeCat  = 'all', activeTab = 'digest';
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+function loadData() {
+  google.script.run.withSuccessHandler(d => { digestData = d;  renderDigest();  updateBadge('digest'); })
+                   .withFailureHandler(e => console.error(e)).getDigestData();
+}
+
+// ── FILTER ──────────────────────────────────────────────────────────────
+
+function filterCat(el, tab) {
+  document.querySelectorAll('#digest-filters .chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  activeCat = el.dataset.cat;
+  renderDigest();
+}
+
+function stepDate(type, offset) {
+  const el = document.getElementById(type + '-date-filter');
+  let d;
+  if (offset === 0 || !el.value) {
+    d = new Date();
+  } else {
+    const parts = el.value.split('-');
+    d = new Date(parts[0], parts[1] - 1, parts[2]);
+    d.setDate(d.getDate() + offset);
+  }
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  el.value = `${yyyy}-${mm}-${dd}`;
+  
+  if (type === 'digest') renderDigest();
+  else renderProject();
+}
+
+// ── RENDER DIGEST ─────────────────────────────────────────────────────────────
+function renderDigest() {
+  const unreadOnly = document.getElementById('unread-only-digest').checked;
+  const dateFilter = document.getElementById('digest-date-filter').value;
+  let items = digestData;
+  if (activeCat !== 'all') items = items.filter(d => d.category === activeCat);
+  if (unreadOnly) items = items.filter(d => !d.isRead);
+  if (dateFilter) {
+    items = items.filter(d => {
+      try { return new Date(d.timestamp).toISOString().slice(0,10) === dateFilter; }
+      catch(_) { return false; }
+    });
+  }
+
+  const feed = document.getElementById('digest-feed');
+  if (!items.length) { feed.innerHTML = '<div class="empty">📭 No digest updates found.</div>'; return; }
+  feed.innerHTML = items.map(d => digestCard(d)).join('');
+
+  // Rebuild category chips
+  const cats = [...new Set(digestData.map(d => d.category))];
+  const fc   = document.querySelector('.cat-filter-scroll');
+  const chips = fc.querySelectorAll('.chip');
+  chips.forEach(c => { if (c.dataset.cat !== 'all') c.remove(); });
+  cats.forEach(cat => {
+    const c = document.createElement('span');
+    c.className = 'chip' + (cat === activeCat ? ' active' : '');
+    c.dataset.cat = cat; c.textContent = cat;
+    c.onclick = () => filterCat(c, 'digest');
+    fc.appendChild(c);
+  });
+}
+
+function digestCard(d) {
+  const ts   = fmtDate(d.timestamp);
+  const dot  = d.isRead ? '<span class="read-dot"></span>' : '<span class="unread-dot"></span>';
+  const goss = d.glossary && d.glossary.length ? glossaryChips(d.glossary) : '';
+  const readBtn = d.isRead ? '' : `<button class="mark-read-btn" onclick="event.stopPropagation(); markRead('${esc(d.runId)}','digest',this)">✓ Mark Read</button>`;
+  const cleanDeep = (d.deepSummaryHtml || '').replace(/<\/?(?:tr|td|table|tbody)[^>]*>/gi, '');
+  return `
+<div class="card ${d.isRead?'read':'unread'}" id="card-${esc(d.runId)}">
+  <div class="card-header" style="cursor:pointer; user-select:none; padding-bottom:14px;" onclick="const content = this.nextElementSibling; content.style.display = content.style.display === 'none' ? 'block' : 'none'; this.querySelector('.card-toggle-icon').textContent = content.style.display === 'none' ? '▼' : '▲';">
+    <div class="card-meta">
+      <span class="card-toggle-icon" style="font-size:10px;color:#9ca3af;margin-right:4px;">▲</span>
+      ${dot}<span class="cat-badge">${esc(d.category)}</span><span class="ts">${ts}</span>
+    </div>
+    ${readBtn}
+  </div>
+  <div class="card-content-wrapper" style="display:block;">
+    <div class="card-body" style="padding-top:0;">${d.briefSummary || '<em style="color:#9ca3af">No summary.</em>'}</div>
+    ${goss || cleanDeep ? `
+    <div class="card-actions">
+      ${cleanDeep ? `<button class="btn-expand" onclick="toggleDeep(this,'deep-${esc(d.runId)}')">📖 Full Analysis ▼</button>` : ''}
+      <div class="glossary-chips">${goss}</div>
+    </div>
+    <div class="deep-section" id="deep-${esc(d.runId)}">
+      ${cleanDeep}
+      ${profilesSection(d)}
+    </div>` : ''}
+  </div>
+</div>`;
+}
+
+function profilesSection(d) {
+  if (!d.profiles || !d.profiles.length) return '';
+  let html = '<div class="section-title">📋 Profiles</div>';
+  const activeProfiles = d.profiles.filter(p => (p.tweets && p.tweets.length > 0) || p.aiSummary);
+  const inactiveProfiles = d.profiles.filter(p => !((p.tweets && p.tweets.length > 0) || p.aiSummary));
+
+  const renderProfile = (p, idx, isInactive) => {
+    const avFallback = `<div class="avatar-fallback">${(p.name||p.handle||'?')[0].toUpperCase()}</div>`;
+    const avatar = p.avatarUrl
+      ? `<img class="avatar" src="${esc(p.avatarUrl)}" onerror="this.style.display='none'" alt="">`
+      : avFallback;
+    const tweets = (p.tweets || []).slice(0,10);
+    const tweetsHtml = tweets.length 
+      ? tweets.map(t => renderTweetCard(t)).join('')
+      : '';
+      
+    const tbId = `tweets-${esc(d.runId)}-${idx}`;
+    const aiSummaryHtml = p.aiSummary ? `<div style="background:#f0fdf4; border-left:3px solid #22c55e; padding:10px 14px; margin-top:10px; font-size:13px; color:#1c1917; line-height:1.6; border-radius:4px;"><div style="font-size:11px; font-weight:700; color:#15803d; text-transform:uppercase; margin-bottom:4px;">✨ Profile Summary</div>${p.aiSummary}</div>` : '';
+
+    return `<div class="profile-block" ${isInactive ? 'style="padding:8px 12px; margin-bottom:8px;"' : ''}>
+      <div class="profile-meta" style="justify-content:space-between; margin-bottom:0;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          ${avatar}
+          <div><div class="profile-name" ${isInactive ? 'style="font-size:13px;"' : ''}>${esc(p.name||p.handle||'Profile')}</div>
+          <div class="profile-handle"><a href="${esc(p.url)}" target="_blank">${esc(p.handle||p.url)}</a></div></div>
+        </div>
+        ${tweets.length ? `<button class="btn-expand" style="font-size:10px; padding:4px 8px; background:#f3f4f6; border-color:#e5e7eb; color:#4b5563;" onclick="toggleTweets(this, '${tbId}', ${tweets.length})">Show Tweets (${tweets.length}) ▼</button>` : (isInactive ? '<span style="font-size:11px; color:#9ca3af; font-weight:600;">No updates</span>' : '')}
+      </div>
+      ${aiSummaryHtml}
+      ${tweets.length ? `<div id="${tbId}" style="display:none; margin-top:12px; border-top:1px solid #f3f4f6;">${tweetsHtml}</div>` : ''}
+    </div>`;
+  };
+
+  activeProfiles.forEach((p, idx) => {
+    html += renderProfile(p, `act-${idx}`, false);
+  });
+
+  if (inactiveProfiles.length > 0) {
+    html += `
+    <div style="margin-top:16px; border:1px solid #e5e7eb; border-radius:8px; overflow:hidden; background:#f9fafb;">
+      <div style="padding:10px 14px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-size:13px; font-weight:700; color:#4b5563; user-select:none;" onclick="const el=this.nextElementSibling; el.style.display=el.style.display==='none'?'block':'none'; this.querySelector('span:last-child').textContent=el.style.display==='none'?'▼':'▲';">
+        <span>Profiles with no new tweets (${inactiveProfiles.length})</span>
+        <span style="font-size:10px; color:#9ca3af;">▼</span>
+      </div>
+      <div style="display:none; padding:0 14px 6px 14px;">
+        ${inactiveProfiles.map((p, idx) => renderProfile(p, `inact-${idx}`, true)).join('')}
+      </div>
+    </div>`;
+  }
+  return html;
+}
+
+
+
+// ── RICH TWEET CARD ───────────────────────────────────────────────────────────
+function renderTweetCard(t) {
+  let badges = '';
+  if (t.isRetweet) badges += `<span class="tweet-badge badge-rt">🔁 Repost${t.authorName ? ' from ' + esc(t.authorName) : ''}</span>`;
+  if (t.isSubscriberOnly) badges += `<span class="tweet-badge badge-sub">⭐ Subscribers Only</span>`;
+
+  let replyHtml = '';
+  if (t.replyContext) {
+    replyHtml = `<div class="tweet-reply-ctx">
+      <div class="reply-author">↩️ Replying to <span>${esc(t.replyContext.authorHandle || t.replyContext.authorName || '')}</span></div>
+      <div class="reply-text">${esc(t.replyContext.text || '')}</div>
+    </div>`;
+  }
+
+  let quoteHtml = '';
+  if (t.quotedTweet) {
+    quoteHtml = `<div class="tweet-quote">
+      <div class="qt-author">🔗 Quoted · ${esc(t.quotedTweet.authorName || '')} ${esc(t.quotedTweet.authorHandle || '')}</div>
+      <div class="qt-text">${esc(t.quotedTweet.text || '')}</div>
+    </div>`;
+  }
+
+  let mediaHtml = '';
+  if (t.mediaUrls && t.mediaUrls.length > 0) {
+    mediaHtml = `<div class="tweet-media">${t.mediaUrls.map(u => `<img src="${esc(u)}" alt="media" onerror="this.style.display='none'" loading="lazy">`).join('')}</div>`;
+  }
+
+  return `<div class="tweet-row">
+    <div class="tweet-ts">🕒 ${fmtDate(t.timestamp)} ${badges}</div>
+    ${replyHtml}
+    <div class="tweet-text">${esc(t.text)}</div>
+    ${quoteHtml}
+    ${mediaHtml}
+    <a class="tweet-link" href="${esc(t.url)}" target="_blank">View on X →</a>
+  </div>`;
+}
+
+// ── GLOSSARY TOOLTIPS ─────────────────────────────────────────────────────────
+function glossaryChips(glossary) {
+  return glossary.slice(0,6).map(g =>
+    `<span class="g-chip" onclick="this.classList.toggle('tip-open')">${esc(g.term)}<span class="g-tip">${esc(g.definition)}</span></span>`
+  ).join('');
+}
+
+// ── ACTIONS ───────────────────────────────────────────────────────────────────
+function toggleDeep(btn, id) {
+  const el = document.getElementById(id);
+  const open = el.classList.toggle('open');
+  btn.textContent = open ? '📖 Full Analysis ▲' : '📖 Full Analysis ▼';
+}
+
+function toggleTweets(btn, id, count) {
+  const el = document.getElementById(id);
+  const isHidden = el.style.display === 'none';
+  el.style.display = isHidden ? 'block' : 'none';
+  btn.textContent = isHidden ? 'Hide Tweets ▲' : `Show Tweets (${count}) ▼`;
+}
+
+function markRead(id, type, btn) {
+  google.script.run.withSuccessHandler(() => {
+    const card = document.getElementById('card-' + id);
+    if (card) { card.classList.remove('unread'); card.classList.add('read'); }
+    if (btn) btn.remove();
+    if (type === 'digest') {
+      const item = digestData.find(d => d.runId === id);
+      if (item) item.isRead = true;
+    } else {
+      const item = projectData.find(p => p.updateId === id);
+      if (item) item.isRead = true;
+    }
+    updateBadge(type === 'digest' ? 'digest' : 'project');
+  }).markAsRead(id, type);
+}
+
+function markAllRead() {
+  google.script.run.withSuccessHandler(() => {
+    digestData.forEach(d => d.isRead = true); 
+    renderDigest();
+    updateBadge('digest');
+  }).markAllAsRead('digest');
+}
+
+function updateBadge(type) {
+  const count = digestData.filter(d => !d.isRead).length;
+  const el = document.getElementById('badge-digest');
+  if (el) {
+    el.textContent = count;
+    el.className = 'badge' + (count === 0 ? ' zero' : '');
+  }
+}
+
+// ── UTILS ─────────────────────────────────────────────────────────────────────
+function fmtDate(ts) {
+  if (!ts) return '';
+  try {
+    const d = new Date(ts);
+    const now = new Date();
+    const diff = (now - d) / 1000;
+    if (diff < 3600)  return Math.round(diff/60) + 'm ago';
+    if (diff < 86400) return Math.round(diff/3600) + 'h ago';
+    return d.toLocaleDateString([], {month:'short',day:'numeric'});
+  } catch(_) { return String(ts); }
+}
+
+function esc(str) {
+  if (str === null || str === undefined) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── BOOT ──────────────────────────────────────────────────────────────────────
+loadData();
+</script>
+</body>
+</html>

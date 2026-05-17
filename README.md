@@ -83,6 +83,14 @@ Once installed, click the extension icon to open the configuration popup.
 2. Add specific X Profile URLs to each category (e.g., `https://x.com/elonmusk`).
 3. Toggle whether you want AI summaries for that specific profile.
 
+## 📊 Web Dashboard Hub
+
+The project includes a standalone Google Apps Script (GAS) Web App that serves as a live, interactive reading dashboard for your scraped digests:
+- **Collapsible Category Cards:** Click any category digest header to instantly collapse or expand the entire card.
+- **Rich Tweet Cards:** Fully mirrors the rich HTML email digests, displaying repost badges, subscriber-only pills, reply contexts, quoted tweets, and inline image/media grids.
+- **Mobile & iOS Safari Optimized:** Features strict viewport width containment (`overflow-x: hidden` on root `html`/`body`), touch-friendly buttons, wrapping category filter chips that spill down naturally on narrow screens, and independently scrollable code blocks/tables.
+- **Zero-Tweet Drawer:** Automatically isolates inactive profiles (zero new tweets) into a dedicated collapsible drawer at the bottom of the feed.
+
 ## 🏗️ Technical Architecture
 
 - **Manifest V3:** The extension strictly utilizes Chrome's Manifest V3 architecture.
