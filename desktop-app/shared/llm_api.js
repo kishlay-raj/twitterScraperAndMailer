@@ -59,21 +59,22 @@ function markdownToEmailHtml(text) {
         if (!currentSection) return;
         const style = getSectionStyle(currentSection.title);
         const innerHtml = renderLines(currentSection.lines);
+        const titleLower = currentSection.title.toLowerCase();
+        const startCollapsed = titleLower.includes('fact') || titleLower.includes('glossary');
+        const contentDisplay = startCollapsed ? 'none' : 'block';
+        const arrowIcon = startCollapsed ? '▼' : '▲';
         parts.push(`
-<table role="presentation" cellpadding="0" cellspacing="0" border="0"
-       class="em-section-block"
-       style="width:100%;margin:12px 0 0 0;border-radius:8px;overflow:hidden;
-              border:1px solid ${style.border};">
-  <tr>
-    <td style="background:${style.bg};padding:10px 14px 4px 14px;">
-      <div class="em-section-title" style="font-size:12px;font-weight:800;color:${style.title};
-                  text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
-        ${currentSection.title}
-      </div>
+<div class="dash-collapsible-section" style="margin:12px 0 0 0;border-radius:8px;overflow:hidden;border:1px solid ${style.border};background:${style.bg};">
+  <div style="padding:10px 14px;">
+    <div class="em-section-title" style="font-size:12px;font-weight:800;color:${style.title};text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;user-select:none;" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'; this.querySelector('.toggle-icon').textContent = this.nextElementSibling.style.display === 'none' ? '▼' : '▲';">
+      <span>${currentSection.title}</span>
+      <span class="toggle-icon" style="font-size:10px;color:#9ca3af;">${arrowIcon}</span>
+    </div>
+    <div class="em-section-content" style="display:${contentDisplay};padding-bottom:4px;">
       ${innerHtml}
-    </td>
-  </tr>
-</table>`);
+    </div>
+  </div>
+</div>`);
         currentSection = null;
     }
 
@@ -149,6 +150,62 @@ function markdownToEmailHtml(text) {
 
     flushSection();
     return parts.join('\n');
+}
+
+/**
+ * Extracts a compact brief summary (overview + top bullets) from raw LLM text.
+ * Returns a small HTML snippet safe to embed in a card.
+ */
+function extractBriefSummary(rawText) {
+    if (!rawText) return '';
+    const lines = rawText.split('\n');
+    let overview = '';
+    const bullets = [];
+    let inSummary = false;
+
+    for (const line of lines) {
+        const t = line.trim();
+        if (!overview && t && !t.startsWith('#') && !t.startsWith('-') && !t.startsWith('*  ')) {
+            overview = t.replace(/\*\*/g, '');
+            continue;
+        }
+        if (/^#{1,3}\s*📝/.test(t) || /^#{1,3}\s*(Minimal|Full)\s+Summary/i.test(t)) {
+            inSummary = true; continue;
+        }
+        if (inSummary && /^#{1,3}/.test(t)) break;
+        if (inSummary && /^[-•]\s+/.test(t)) {
+            bullets.push(t.replace(/^[-•]\s+/, '').replace(/\*\*/g, ''));
+        }
+    }
+
+    let html = '';
+    if (overview) html += `<p class="brief-overview">${overview}</p>`;
+    if (bullets.length) {
+        html += '<ul class="brief-bullets">' +
+            bullets.slice(0, 5).map(b => `<li>${b}</li>`).join('') +
+            '</ul>';
+    }
+    return html;
+}
+
+/**
+ * Parses the Glossary section of raw LLM text into [{term, definition}].
+ */
+function extractGlossary(rawText) {
+    if (!rawText) return [];
+    const lines = rawText.split('\n');
+    const terms = [];
+    let inGloss = false;
+    for (const line of lines) {
+        const t = line.trim();
+        if (/^#{1,3}\s*📖/.test(t) || /^#{1,3}\s*Glossary/i.test(t)) { inGloss = true; continue; }
+        if (inGloss && /^#{1,3}/.test(t)) break;
+        if (inGloss) {
+            const m = t.match(/^[-•]\s+\*{0,2}([^*:]+)\*{0,2}[:\s]+(.+)/);
+            if (m) terms.push({ term: m[1].trim(), definition: m[2].trim() });
+        }
+    }
+    return terms;
 }
 
 /**
@@ -295,7 +352,12 @@ Provide a detailed bulleted summary (use "- " prefix) that synthesizes all the t
                     ? `<div style="margin-top:8px;font-size:11px;color:#f97316;font-style:italic;text-align:right;">⚠️ Summary may be incomplete (token limit reached)</div>`
                     : '';
                 const attribution = `<div style="margin-top:12px;font-size:11px;color:#9ca3af;font-style:italic;text-align:right;">— ${model.displayName}${keyLabel}</div>`;
-                return markdownToEmailHtml(raw.trim()) + truncationNote + attribution;
+                const rawTrimmed = raw.trim();
+                return {
+                    html:         markdownToEmailHtml(rawTrimmed) + truncationNote + attribution,
+                    briefSummary: extractBriefSummary(rawTrimmed),
+                    glossary:     extractGlossary(rawTrimmed)
+                };
 
             } catch (err) {
                 const isTimeout = err.message && err.message.startsWith('TIMEOUT_');
@@ -359,7 +421,12 @@ Provide a detailed bulleted summary (use "- " prefix) that synthesizes all the t
 
         console.log("[LLM] Summary generated via HuggingFace (fallback).");
         const attribution = `<div style="margin-top:12px;font-size:11px;color:#9ca3af;font-style:italic;text-align:right;">— Qwen2.5-72B (HuggingFace fallback)</div>`;
-        return markdownToEmailHtml(raw.trim()) + attribution;
+        const rawTrimmed = raw.trim();
+        return {
+            html:         markdownToEmailHtml(rawTrimmed) + attribution,
+            briefSummary: extractBriefSummary(rawTrimmed),
+            glossary:     extractGlossary(rawTrimmed)
+        };
 
     } catch (err) {
         const isTimeout = err.message && err.message.startsWith('TIMEOUT_');
@@ -377,5 +444,5 @@ Provide a detailed bulleted summary (use "- " prefix) that synthesizes all the t
 
 // Export for Node.js Testing
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { summarizeTweets, markdownToEmailHtml };
+    module.exports = { summarizeTweets, markdownToEmailHtml, extractBriefSummary, extractGlossary };
 }

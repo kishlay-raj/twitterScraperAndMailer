@@ -17,6 +17,7 @@ const browserPool = require('./browser-pool');
 const idleDetect = require('./idle-detect');
 const { summarizeTweets } = require('../shared/llm_api');
 const { sendEmailPayload } = require('../shared/email_api');
+const { pushDigestUpdate } = require('./dashboard-push');
 const { app } = require('electron');
 const path = require('path');
 
@@ -213,9 +214,12 @@ function getIsRunning() {
 
 async function _runCategory(categoryIndex, category, addLog) {
     const settings = store.get('settings') || {};
-    const { geminiApiKey, llmApiKey, emailApiKey: webhookUrl, recipientEmail } = settings;
+    const { geminiApiKey, llmApiKey, emailApiKey: webhookUrl, recipientEmail,
+            dashboardUrl, enableDashboard } = settings;
 
-    if (!webhookUrl || !recipientEmail) {
+    const emailEnabled = category.enableEmail !== false; // default true
+
+    if (emailEnabled && (!webhookUrl || !recipientEmail)) {
         addLog(`[${category.name}] ❌ Missing webhook URL or recipient email. Configure settings first.`, 'error');
         return;
     }
@@ -231,6 +235,9 @@ async function _runCategory(categoryIndex, category, addLog) {
         enableFactCheck: category.enableFactCheck !== false,
         enableGlossary: category.enableGlossary !== false,
         summaryPrompt: category.summaryPrompt || '',
+        // Dashboard fields — populated during build
+        _dashboardBriefSummary: '',
+        _dashboardGlossary: [],
         profiles: []
     };
 
@@ -290,16 +297,22 @@ async function _runCategory(categoryIndex, category, addLog) {
         }
     }
 
-    // ── Skip dispatch if there is absolutely no content to email ────────────
+    // ── Skip dispatch if there is absolutely no content ──────────────────────
     const totalTweets = compilationPayload.profiles.reduce((sum, p) => sum + (p.tweets?.length || 0), 0);
     const totalErrors = compilationPayload.profiles.filter(p => p.error).length;
     if (totalTweets === 0 && totalErrors === 0) {
-        addLog(`[${category.name}] ⏭️ Skipping email — no tweets found across all profiles.`);
+        addLog(`[${category.name}] ⏭️ Skipping — no tweets found across all profiles.`);
         return;
     }
 
-    // ── Build & dispatch the email ─────────────────────────────────────────
-    await _buildAndDispatch(category.name, compilationPayload, geminiApiKey, llmApiKey, webhookUrl, recipientEmail, addLog);
+    // ── Build & dispatch (email + dashboard) ────────────────────────────────
+    await _buildAndDispatch(
+        category.name, compilationPayload,
+        geminiApiKey, llmApiKey,
+        emailEnabled ? webhookUrl : null, recipientEmail,
+        enableDashboard ? dashboardUrl : null,
+        addLog
+    );
 
     // ── Save new processed IDs ─────────────────────────────────────────────
     if (newIdsThisRun.size > 0) {
@@ -312,7 +325,7 @@ async function _runCategory(categoryIndex, category, addLog) {
 
 // ─── Email Build & Dispatch ──────────────────────────────────────────────────
 
-async function _buildAndDispatch(categoryName, categoryData, geminiApiKey, llmApiKey, webhookUrl, recipientEmail, addLog) {
+async function _buildAndDispatch(categoryName, categoryData, geminiApiKey, llmApiKey, webhookUrl, recipientEmail, dashboardUrl, addLog) {
     const { extraEmails, profiles, enableCategorySummary, summaryMode, enableFactCheck, enableGlossary, summaryPrompt } = categoryData;
 
     // Sort: profiles with content first
@@ -369,9 +382,12 @@ async function _buildAndDispatch(categoryName, categoryData, geminiApiKey, llmAp
         if (profile.enableAiSummary) {
             let summary = '';
             try {
-                summary = await summarizeTweets(profile.tweets, geminiApiKey, llmApiKey, summaryPrompt);
+                const result = await summarizeTweets(profile.tweets, geminiApiKey, llmApiKey, summaryPrompt);
+                summary = result.html;
+                profile._dashboardAiSummary = summary;
             } catch (e) {
                 summary = `<em style="color:#dc2626;">⚠️ AI Summary failed: ${e.message}</em>`;
+                profile._dashboardAiSummary = summary;
             }
             profileHtml += `<tr><td style="padding:12px 28px 4px 28px;">
               <div class="em-ai-summary-box" style="background:#f0fdf4; border-left:4px solid #22c55e; border-radius:0 8px 8px 0; padding:14px 16px;">
@@ -431,11 +447,17 @@ async function _buildAndDispatch(categoryName, categoryData, geminiApiKey, llmAp
             addLog(`[${categoryName}] Summarising ${tweetsForSummary.length} tweets...`);
 
             try {
-                const summaryText = await summarizeTweets(
+                const result = await summarizeTweets(
                     tweetsForSummary, geminiApiKey, llmApiKey, summaryPrompt,
                     enableFactCheck, enableGlossary, summaryMode || 'minimal'
                 );
+                const summaryText = result.html;
+                // Store structured data for dashboard push
+                categoryData._dashboardBriefSummary = result.briefSummary;
+                categoryData._dashboardGlossary     = result.glossary;
+                categoryData._dashboardDeepSummary  = result.html;
                 addLog(`[${categoryName}] ✅ Category summary generated (${summaryText?.length ?? 0} chars).`);
+
                 const totalTweets = allTweets.length;
                 const totalProfiles = sortedProfiles.filter(p => p.tweets.length > 0).length;
 
@@ -497,7 +519,7 @@ async function _buildAndDispatch(categoryName, categoryData, geminiApiKey, llmAp
     }
     if (currentChunk.length > 0) emailChunks.push(currentChunk);
 
-    // ── Dispatch each chunk ──────────────────────────────────────────────
+    // ── Dispatch each chunk (email) ──────────────────────────────────────────
     addLog(`Compilation complete for ${categoryName}. ${emailChunks.length} email(s) to send.`);
 
     let allRecipients = recipientEmail;
@@ -508,21 +530,59 @@ async function _buildAndDispatch(categoryName, categoryData, geminiApiKey, llmAp
 
     const summaryPrefix = (enableCategorySummary && categorySummaryBlocks.length > 0) ? '✨ ' : '';
 
-    for (let ci = 0; ci < emailChunks.length; ci++) {
-        const chunkLabel = emailChunks.length > 1 ? `Email ${ci + 1}/${emailChunks.length}` : '';
-        const emailSubject = `${summaryPrefix}Curation: ${categoryName}${chunkLabel ? ` (${chunkLabel})` : ''}`;
-        const emailHtml = _buildEmailShell(categoryName, chunkLabel, emailChunks[ci]);
-        const bodySizeKB = (encoder.encode(emailHtml).length / 1024).toFixed(1);
-
-        addLog(`Dispatching [${categoryName}]${chunkLabel ? ` ${chunkLabel}` : ''} to: ${allRecipients} (${bodySizeKB} KB)`);
-        try {
-            await sendEmailPayload(emailHtml, allRecipients, webhookUrl, emailSubject, null);
-            addLog(`✅ Email for [${categoryName}]${chunkLabel ? ` ${chunkLabel}` : ''} dispatched successfully.`);
-        } catch (e) {
-            addLog(`❌ Email dispatch FAILED for [${categoryName}]: ${e.message}`, 'error');
+    if (webhookUrl) {
+        for (let ci = 0; ci < emailChunks.length; ci++) {
+            const chunkLabel  = emailChunks.length > 1 ? `Email ${ci + 1}/${emailChunks.length}` : '';
+            const emailSubject = `${summaryPrefix}Curation: ${categoryName}${chunkLabel ? ` (${chunkLabel})` : ''}`;
+            const emailHtml    = _buildEmailShell(categoryName, chunkLabel, emailChunks[ci]);
+            const bodySizeKB   = (encoder.encode(emailHtml).length / 1024).toFixed(1);
+            addLog(`Dispatching [${categoryName}]${chunkLabel ? ` ${chunkLabel}` : ''} to: ${allRecipients} (${bodySizeKB} KB)`);
+            try {
+                await sendEmailPayload(emailHtml, allRecipients, webhookUrl, emailSubject, null);
+                addLog(`✅ Email for [${categoryName}]${chunkLabel ? ` ${chunkLabel}` : ''} dispatched successfully.`);
+            } catch (e) {
+                addLog(`❌ Email dispatch FAILED for [${categoryName}]: ${e.message}`, 'error');
+            }
+            if (ci < emailChunks.length - 1) await new Promise(r => setTimeout(r, 1500));
         }
+    } else {
+        addLog(`[${categoryName}] 📭 Email disabled for this category — skipping.`, 'info');
+    }
 
-        if (ci < emailChunks.length - 1) await new Promise(r => setTimeout(r, 1500));
+    // ── Push to dashboard ───────────────────────────────────────────────────
+    if (dashboardUrl) {
+        const tweetCount = sortedProfiles.reduce((s, p) => s + (p.tweets?.length || 0), 0);
+        const runId = `${categoryName}_${new Date().toISOString().slice(0,10)}_${tweetCount}`;
+        const profileMetas = sortedProfiles.filter(p => !p.error).map(p => ({
+            url: p.url, name: p.profileMeta?.profileName || '',
+            handle: p.profileMeta?.profileHandle || '',
+            avatarUrl: p.profileMeta?.profileAvatarUrl || '', tweetCount: p.tweets?.length || 0,
+            aiSummary: p._dashboardAiSummary || '',
+            tweets: (p.tweets || []).slice(0, 10).map(t => ({
+                id: t.id, text: t.text, url: t.url, timestamp: t.timestamp,
+                authorHandle: t.authorHandle || '', authorName: t.authorName || '',
+                mediaUrls: (t.mediaUrls || []).slice(0, 4),
+                isRetweet: !!t.isRetweet,
+                isSubscriberOnly: !!t.isSubscriberOnly,
+                replyContext: t.replyContext ? {
+                    text: (t.replyContext.text || '').slice(0, 300),
+                    authorName: t.replyContext.authorName || '',
+                    authorHandle: t.replyContext.authorHandle || ''
+                } : null,
+                quotedTweet: t.quotedTweet ? {
+                    text: (t.quotedTweet.text || '').slice(0, 300),
+                    authorName: t.quotedTweet.authorName || '',
+                    authorHandle: t.quotedTweet.authorHandle || ''
+                } : null
+            }))
+        }));
+        await pushDigestUpdate(dashboardUrl, {
+            runId, category: categoryName, timestamp: Date.now(),
+            briefSummary:    categoryData._dashboardBriefSummary || '',
+            deepSummaryHtml: categoryData._dashboardDeepSummary || '',
+            glossary:  categoryData._dashboardGlossary || [],
+            profiles:  profileMetas
+        });
     }
 
     await new Promise(r => setTimeout(r, 1500));

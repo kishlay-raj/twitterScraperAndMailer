@@ -101,6 +101,13 @@ function loadSettingsIntoUI(s) {
     // Browser mode: migrate from old boolean headlessMode to new tri-state
     const browserMode = s.browserMode || (s.headlessMode !== false ? 'headless' : 'visible');
     document.getElementById('browser-mode').value = browserMode;
+    document.getElementById('enable-dashboard').checked = !!s.enableDashboard;
+    document.getElementById('dashboard-url').value   = s.dashboardUrl || '';
+
+    // Load auto-launch state from main process (not stored in settings — it's a system setting)
+    window.api.getAutoLaunch().then(enabled => {
+        document.getElementById('auto-launch').checked = !!enabled;
+    }).catch(() => {});
 }
 
 function collectSettingsFromUI() {
@@ -114,7 +121,9 @@ function collectSettingsFromUI() {
         allowDuplicates: document.getElementById('allow-duplicates').checked,
         enableSchedule: document.getElementById('enable-schedule').checked,
         scheduleTime: document.getElementById('schedule-time').value,
-        browserMode: document.getElementById('browser-mode').value,
+        browserMode:     document.getElementById('browser-mode').value,
+        enableDashboard: document.getElementById('enable-dashboard').checked,
+        dashboardUrl:    document.getElementById('dashboard-url').value.trim(),
     };
 }
 
@@ -156,6 +165,11 @@ function buildCategoryEl(cat, idx) {
 
       <!-- Category-level settings -->
       <div class="category-settings-row">
+        <!-- Email toggle for this category -->
+        <label class="toggle-label" title="Send email digest for this category">
+          <input type="checkbox" class="cat-email-toggle" ${cat.enableEmail !== false ? 'checked' : ''}>
+          📧 Email
+        </label>
         <!-- A: Click-to-cycle summary mode pill (Off → Minimal → Normal → Off) -->
         <button
           class="cat-badge cat-badge-summarise cat-badge-mode-${cat.categorySummaryMode || 'off'} ${(cat.categorySummaryMode && cat.categorySummaryMode !== 'off') ? 'is-on' : ''}"
@@ -264,6 +278,11 @@ function buildCategoryEl(cat, idx) {
         btn.classList.add(`cat-badge-mode-${next}`);
         btn.classList.toggle('is-on', next !== 'off');
 
+        saveCategories();
+    });
+
+    section.querySelector('.cat-email-toggle').addEventListener('change', (e) => {
+        categories[idx].enableEmail = e.target.checked;
         saveCategories();
     });
 
@@ -534,6 +553,13 @@ function bindEventListeners() {
         await window.api.clearLogs();
         allLogs = [];
         renderLogs([]);
+    });
+
+    // Auto-launch at login — apply immediately on toggle
+    document.getElementById('auto-launch').addEventListener('change', async (e) => {
+        const enabled = e.target.checked;
+        await window.api.setAutoLaunch(enabled);
+        showStatus('status-message', enabled ? '✅ Auto-launch enabled — app will start at login.' : '✅ Auto-launch disabled.', 'success');
     });
 
     // Export

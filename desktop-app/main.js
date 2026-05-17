@@ -206,6 +206,17 @@ function registerIpcHandlers() {
         }
     });
 
+    // Auto-launch at login
+    ipcMain.handle('get-auto-launch', () => {
+        return app.getLoginItemSettings().openAtLogin;
+    });
+
+    ipcMain.handle('set-auto-launch', (event, enabled) => {
+        app.setLoginItemSettings({ openAtLogin: enabled });
+        logger.add(`🚀 Auto-launch at login ${enabled ? 'enabled' : 'disabled'}.`, 'info');
+        return { success: true, openAtLogin: enabled };
+    });
+
     // Import / Export config
     ipcMain.handle('export-config', async () => {
         const data = store.getAll();

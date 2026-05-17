@@ -87,6 +87,13 @@
           <input type="time" id="schedule-time" style="flex: 1;">
         </div>
       </div>
+      <div style="margin-bottom: 10px;">
+        <label style="cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: #4b5563;">
+          <input type="checkbox" id="auto-launch">
+          Launch DailyUpdates automatically at login
+        </label>
+        <div style="font-size: 0.72rem; color: #6b7280; margin-top: 3px; margin-left: 24px;">App will start silently in the menu bar tray when you log into macOS.</div>
+      </div>
       <div style="margin-bottom: 15px;">
         <label for="browser-mode" style="display: block; font-size: 0.9rem; color: #4b5563; margin-bottom: 6px;">🌐 Browser Mode:</label>
         <select id="browser-mode" style="padding: 8px 12px; border-radius: 6px; border: 1px solid #d1d5db; width: 100%; max-width: 320px; height: 38px; font-size: 0.85rem;">
@@ -99,6 +106,15 @@
           <strong>Visible:</strong> Opens a Chrome window, less bot detection.<br>
           <strong>Smart:</strong> Auto-switches — uses visible browser when you're away (idle 5+ min), headless when you're active.
         </div>
+      </div>
+      <div style="margin-bottom: 16px; padding: 12px 14px; background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 8px;">
+        <label style="cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: #4b5563; margin-bottom: 8px;">
+          <input type="checkbox" id="enable-dashboard">
+          <strong>📊 Push updates to web dashboard</strong>
+        </label>
+        <label for="dashboard-url" style="display: block; font-size: 0.82rem; color: #6b7280; margin-bottom: 4px;">GAS Dashboard Web App URL:</label>
+        <input type="url" id="dashboard-url" placeholder="https://script.google.com/macros/s/.../exec" style="width:100%;">
+        <div style="font-size:0.7rem;color:#9ca3af;margin-top:4px;">Deploy your GAS project as a Web App and paste the URL here.</div>
       </div>
       <button id="save-settings-btn" class="primary-btn">💾 Save Settings</button>
       <div id="status-message"></div>

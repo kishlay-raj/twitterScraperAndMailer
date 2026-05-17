@@ -41,6 +41,10 @@ contextBridge.exposeInMainWorld('api', {
     exportConfig: () => ipcRenderer.invoke('export-config'),
     importConfig: () => ipcRenderer.invoke('import-config'),
 
+    // ── Auto-launch at login ─────────────────────────────────────────────────
+    getAutoLaunch: () => ipcRenderer.invoke('get-auto-launch'),
+    setAutoLaunch: (enabled) => ipcRenderer.invoke('set-auto-launch', enabled),
+
     // ── Login Status Events ──────────────────────────────────────────────────
     // removeAllListeners() before re-adding prevents listener accumulation
     // if the renderer page is ever reloaded (e.g. via devtools).
