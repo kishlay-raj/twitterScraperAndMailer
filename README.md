@@ -90,9 +90,41 @@ Once installed, click the extension icon to open the configuration popup.
 - **Content Scripts (`content/scraper.js`):** Injected dynamically into X.com pages to interact with the DOM, scroll intelligently, and extract tweet data accurately without triggering anti-bot protections.
 - **Popup UI (`popup/`):** Vanilla HTML/CSS/JS interface for managing categories, profiles, and backend API credentials (saved safely in `chrome.storage.local`).
 
-## ⚠️ Important Notes
-- This extension runs locally in your browser and relies on your active, authenticated session on X.com to read tweets (especially subscriber-only ones).
-- X frequently changes its DOM structure which may occasionally break the extraction logic. The `scraper.js` uses flexible `data-testid` and SVG path matching to maximize resilience.
+## 🛠️ Common Commands
+
+Here are the standard development and operational commands used in this project:
+
+### Desktop App (Electron)
+- **Install Dependencies:**
+  ```bash
+  cd desktop-app && npm install
+  ```
+- **Run Locally (Development Mode):**
+  ```bash
+  cd desktop-app && npm start
+  ```
+- **Compile Production Mac App Build (.app & .zip):**
+  ```bash
+  cd desktop-app && npm run build:mac
+  ```
+
+### GAS Backend (clasp)
+Ensure `@google/clasp` is logged in (`npx clasp login`) and matches the configuration in `gas/.clasp.json`.
+- **Force Push Changes to Apps Script:**
+  ```bash
+  cd gas && npx @google/clasp push --force
+  ```
+- **Deploy backend updates to a specific Web App ID:**
+  ```bash
+  cd gas && npx @google/clasp deploy -i AKfycbzmgqLjcaqqjlYKSxHkMprf4MRnuJteP4WDU0nNrOdrwpHTB3Bs3S2jKhw1YV-yrtcHvg -d "Deploy message"
+  ```
+
+### Maintenance
+- **Purge/Clear Spreadsheet Database:**
+  Send a `GET` request to your live Apps Script Web App URL with the `clearData=true` query parameter:
+  ```bash
+  curl -sL "https://script.google.com/macros/s/AKfycbzmgqLjcaqqjlYKSxHkMprf4MRnuJteP4WDU0nNrOdrwpHTB3Bs3S2jKhw1YV-yrtcHvg/exec?clearData=true"
+  ```
 
 ## 📄 License
 This project is open-source and available under the standard MIT License.
