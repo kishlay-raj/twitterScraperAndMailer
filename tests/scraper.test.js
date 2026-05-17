@@ -361,6 +361,13 @@ describe('X Profile Scraper', () => {
         expect(onMessageListener).toBeDefined();
 
         document.body.innerHTML = `
+            <a href="/user/photo">
+                <img src="https://pbs.twimg.com/profile_images/123/photo.jpg" />
+            </a>
+            <div data-testid="UserName">
+                <span>User Name</span>
+                <span>@user</span>
+            </div>
             <div data-testid="tweet">
                 <a href="https://x.com/user/status/222">Time</a>
                 <time datetime="2026-03-08T11:00:00Z"></time>

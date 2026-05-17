@@ -88,6 +88,7 @@ Once installed, click the extension icon to open the configuration popup.
 The project includes a standalone Google Apps Script (GAS) Web App that serves as a live, interactive reading dashboard for your scraped digests:
 - **Collapsible Category Cards:** Click any category digest header to instantly collapse or expand the entire card.
 - **Rich Tweet Cards:** Fully mirrors the rich HTML email digests, displaying repost badges, subscriber-only pills, reply contexts, quoted tweets, and inline image/media grids.
+- **Dark Mode Support:** Features a premium dark theme powered by CSS custom properties (`:root` / `[data-theme="dark"]`). Includes auto-detection of OS preferences (`prefers-color-scheme: dark`), a header toggle button (`🌙`/`☀️`), and persistent state saved via `localStorage`.
 - **Mobile & iOS Safari Optimized:** Features strict viewport width containment (`overflow-x: hidden` on root `html`/`body`), touch-friendly buttons, wrapping category filter chips that spill down naturally on narrow screens, and independently scrollable code blocks/tables.
 - **Zero-Tweet Drawer:** Automatically isolates inactive profiles (zero new tweets) into a dedicated collapsible drawer at the bottom of the feed.
 
@@ -124,14 +125,14 @@ Ensure `@google/clasp` is logged in (`npx clasp login`) and matches the configur
   ```
 - **Deploy backend updates to a specific Web App ID:**
   ```bash
-  cd gas && npx @google/clasp deploy -i AKfycbzmgqLjcaqqjlYKSxHkMprf4MRnuJteP4WDU0nNrOdrwpHTB3Bs3S2jKhw1YV-yrtcHvg -d "Deploy message"
+  cd gas && npx @google/clasp deploy -i AKfycbwIo4PUjT-YaotO7d9Y-OBvGVsjiztgc1purJa5bGugDYEvzO4dg4FsG4-h_2TAaSD3SQ -d "Deploy message"
   ```
 
 ### Maintenance
 - **Purge/Clear Spreadsheet Database:**
   Send a `GET` request to your live Apps Script Web App URL with the `clearData=true` query parameter:
   ```bash
-  curl -sL "https://script.google.com/macros/s/AKfycbzmgqLjcaqqjlYKSxHkMprf4MRnuJteP4WDU0nNrOdrwpHTB3Bs3S2jKhw1YV-yrtcHvg/exec?clearData=true"
+  curl -sL "https://script.google.com/macros/s/AKfycbwIo4PUjT-YaotO7d9Y-OBvGVsjiztgc1purJa5bGugDYEvzO4dg4FsG4-h_2TAaSD3SQ/exec?clearData=true"
   ```
 
 ## 📄 License
