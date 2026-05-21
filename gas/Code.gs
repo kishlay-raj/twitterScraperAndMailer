@@ -31,6 +31,7 @@ function doGet(e) {
     const id   = e.parameter.markRead;
     const type = e.parameter.type || 'digest';
     _setRead(id, type);
+    return ContentService.createTextOutput("OK");
   }
   if (e && e.parameter && e.parameter.clearData === 'true') {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -42,7 +43,27 @@ function doGet(e) {
     });
     return ContentService.createTextOutput("Data cleared.");
   }
-  return HtmlService.createHtmlOutputFromFile('dashboard')
+  if (e && e.parameter && e.parameter.action) {
+    const action = e.parameter.action;
+    if (action === 'getDigestData') {
+      return _jsonResponse(getDigestData());
+    }
+    if (action === 'markAllAsRead') {
+      const type = e.parameter.type || 'digest';
+      markAllAsRead(type);
+      return ContentService.createTextOutput("OK");
+    }
+  }
+
+  const template = HtmlService.createTemplateFromFile('dashboard');
+  template.initialData = getDigestData();
+  try {
+    template.gasUrl = ScriptApp.getService().getUrl();
+  } catch (_) {
+    template.gasUrl = '';
+  }
+
+  return template.evaluate()
     .setTitle('DailyUpdates Hub')
     .setSandboxMode(HtmlService.SandboxMode.IFRAME)
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
@@ -55,6 +76,7 @@ function doPost(e) {
     const type = payload.type || 'digest';
     if (type === 'digest')         return _handleDigestPush(payload);
     if (type === 'project_update') return _handleProjectPush(payload);
+    if (type === 'get_processed_ids') return _getProcessedIds();
     return _jsonResponse({ error: 'Unknown payload type' });
   } catch (err) {
     return _jsonResponse({ error: err.message });
@@ -189,6 +211,33 @@ function _handleProjectPush(payload) {
   return _jsonResponse({ ok: true });
 }
 
+// ── GET PROCESSED IDS ─────────────────────────────────────────────────────────
+
+function _getProcessedIds() {
+  const sheet = _getSheet(SHEET_DIGEST);
+  const rows = sheet.getDataRange().getValues();
+  const ids = new Set();
+  
+  // rows[i][D.profiles] contains profilesJson
+  for (let i = 1; i < rows.length; i++) {
+    const profilesJson = rows[i][D.profiles];
+    if (profilesJson) {
+      try {
+        const profiles = JSON.parse(profilesJson);
+        profiles.forEach(p => {
+          if (p.tweets) {
+            p.tweets.forEach(t => {
+              if (t.id) ids.add(String(t.id));
+            });
+          }
+        });
+      } catch (e) {}
+    }
+  }
+  
+  return _jsonResponse({ ok: true, ids: Array.from(ids) });
+}
+
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 
 function _getSheet(name) {
@@ -228,4 +277,16 @@ function _parseJson(str, fallback) {
 function _jsonResponse(data) {
   return ContentService.createTextOutput(JSON.stringify(data))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/** Escapes special characters in JSON strings so they can be safely put in a single-quoted JS literal. */
+function escapeJsString(str) {
+  if (!str) return '';
+  return str
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
 }

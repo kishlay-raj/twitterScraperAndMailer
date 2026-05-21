@@ -17,7 +17,7 @@ const browserPool = require('./browser-pool');
 const idleDetect = require('./idle-detect');
 const { summarizeTweets } = require('../shared/llm_api');
 const { sendEmailPayload } = require('../shared/email_api');
-const { pushDigestUpdate } = require('./dashboard-push');
+const { pushDigestUpdate, fetchProcessedTweetIds } = require('./dashboard-push');
 const { app } = require('electron');
 const path = require('path');
 
@@ -99,6 +99,29 @@ async function _ensureLoggedIn(addLog) {
     return false;
 }
 
+// ─── Sync Processed IDs ──────────────────────────────────────────────────────
+
+async function _syncProcessedIds(addLog) {
+    const settings = store.get('settings') || {};
+    const { dashboardUrl, enableDashboard } = settings;
+    if (!enableDashboard || !dashboardUrl) return;
+
+    try {
+        addLog('🔄 Syncing processed tweet IDs from dashboard...');
+        const remoteIds = await fetchProcessedTweetIds(dashboardUrl);
+        if (remoteIds && remoteIds.length > 0) {
+            const localIds = store.get('processedTweetIds') || [];
+            const merged = new Set([...localIds, ...remoteIds]);
+            let combined = Array.from(merged);
+            if (combined.length > 10000) combined = combined.slice(-10000); // keep it bounded
+            store.set('processedTweetIds', combined);
+            addLog(`✅ Synced ${remoteIds.length} IDs from dashboard (Total: ${combined.length}).`);
+        }
+    } catch (err) {
+        addLog(`⚠️ Failed to sync processed IDs: ${err.message}`, 'warn');
+    }
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
@@ -120,6 +143,9 @@ async function runAllCategories(addLog = logger.add.bind(logger)) {
         // ── Login gate: abort/wait if not logged in ────────────────────────
         const loggedIn = await _ensureLoggedIn(addLog);
         if (!loggedIn) return;
+
+        // ── Sync processed IDs from dashboard ──────────────────────────────
+        await _syncProcessedIds(addLog);
 
         const categories = store.get('categories') || [];
         const active = categories.filter(c => c.isActive !== false);
@@ -185,6 +211,9 @@ async function runSingleCategory(categoryIndex, addLog = logger.add.bind(logger)
         // ── Login gate ────────────────────────────────────────────────────
         const loggedIn = await _ensureLoggedIn(addLog);
         if (!loggedIn) return;
+
+        // ── Sync processed IDs from dashboard ──────────────────────────────
+        await _syncProcessedIds(addLog);
 
         await _runCategory(categoryIndex, cat, addLog);
         if (cancelRequested) addLog('🛑 Run stopped by user.', 'warn');

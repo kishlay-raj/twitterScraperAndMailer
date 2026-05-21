@@ -179,10 +179,48 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 let digestData = [], projectData = [];
 let activeCat  = 'all', activeTab = 'digest';
 
+// Embedded initial data injected by Google Apps Script template engine
+const rawData = '<?!= typeof initialData !== "undefined" ? escapeJsString(JSON.stringify(initialData)) : "" ?>';
+const GAS_URL = '<?!= typeof gasUrl !== "undefined" ? gasUrl : "" ?>';
+
 // ── INIT ──────────────────────────────────────────────────────────────────────
 function loadData() {
-  google.script.run.withSuccessHandler(d => { digestData = d;  renderDigest();  updateBadge('digest'); })
-                   .withFailureHandler(e => console.error(e)).getDigestData();
+  const useFetch = function() {
+    if (!GAS_URL || GAS_URL.startsWith('<' + '?')) {
+      console.error('GAS_URL is not defined or invalid.');
+      return;
+    }
+    fetch(GAS_URL + '?action=getDigestData', { redirect: 'follow' })
+      .then(res => {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(d => {
+        digestData = d;
+        renderDigest();
+        updateBadge('digest');
+      })
+      .catch(err => {
+        console.error('Fetch failed:', err);
+        document.getElementById('digest-feed').innerHTML = '<div class="empty">❌ Failed to load digest: ' + err.message + '</div>';
+      });
+  };
+
+  if (typeof google !== 'undefined' && google.script && google.script.run) {
+    google.script.run
+      .withSuccessHandler(d => {
+        digestData = d;
+        renderDigest();
+        updateBadge('digest');
+      })
+      .withFailureHandler(e => {
+        console.warn('google.script.run getDigestData failed, trying fetch...', e);
+        useFetch();
+      })
+      .getDigestData();
+  } else {
+    useFetch();
+  }
 }
 
 // ── FILTER ──────────────────────────────────────────────────────────────
@@ -388,27 +426,61 @@ function toggleTweets(btn, id, count) {
 }
 
 function markRead(id, type, btn) {
-  google.script.run.withSuccessHandler(() => {
-    const card = document.getElementById('card-' + id);
-    if (card) { card.classList.remove('unread'); card.classList.add('read'); }
-    if (btn) btn.remove();
-    if (type === 'digest') {
-      const item = digestData.find(d => d.runId === id);
-      if (item) item.isRead = true;
-    } else {
-      const item = projectData.find(p => p.updateId === id);
-      if (item) item.isRead = true;
-    }
-    updateBadge(type === 'digest' ? 'digest' : 'project');
-  }).markAsRead(id, type);
+  // 1. Optimistic UI update (execute immediately for instant response)
+  const card = document.getElementById('card-' + id);
+  if (card) { card.classList.remove('unread'); card.classList.add('read'); }
+  if (btn) btn.remove();
+  if (type === 'digest') {
+    const item = digestData.find(d => d.runId === id);
+    if (item) item.isRead = true;
+  } else {
+    const item = projectData.find(p => p.updateId === id);
+    if (item) item.isRead = true;
+  }
+  updateBadge(type === 'digest' ? 'digest' : 'project');
+
+  // 2. Background sync
+  const useFetch = function() {
+    if (!GAS_URL || GAS_URL.startsWith('<' + '?')) return;
+    fetch(GAS_URL + '?markRead=' + encodeURIComponent(id) + '&type=' + encodeURIComponent(type), { mode: 'no-cors' })
+      .catch(e => console.error('Optimistic background markRead sync failed:', e));
+  };
+
+  if (typeof google !== 'undefined' && google.script && google.script.run) {
+    google.script.run
+      .withFailureHandler(e => {
+        console.warn('google.script.run markAsRead failed, trying fetch...', e);
+        useFetch();
+      })
+      .markAsRead(id, type);
+  } else {
+    useFetch();
+  }
 }
 
 function markAllRead() {
-  google.script.run.withSuccessHandler(() => {
-    digestData.forEach(d => d.isRead = true); 
-    renderDigest();
-    updateBadge('digest');
-  }).markAllAsRead('digest');
+  // 1. Optimistic UI update
+  digestData.forEach(d => d.isRead = true); 
+  renderDigest();
+  updateBadge('digest');
+
+  // 2. Background sync
+  const useFetch = function() {
+    if (!GAS_URL || GAS_URL.startsWith('<' + '?')) return;
+    fetch(GAS_URL + '?action=markAllAsRead&type=digest', { mode: 'no-cors' })
+      .catch(e => console.error('Optimistic background markAllAsRead failed:', e));
+  };
+
+  if (typeof google !== 'undefined' && google.script && google.script.run) {
+    google.script.run
+      .withFailureHandler(e => {
+        console.warn('google.script.run markAllAsRead failed, trying fetch...', e);
+        useFetch();
+      })
+      .markAllAsRead('digest');
+  } else {
+    useFetch();
+  }
 }
 
 function updateBadge(type) {
@@ -458,7 +530,19 @@ function setDark(dark) {
     setDark(saved ? saved === 'dark' : prefersDark);
   } catch(_) {}
 })();
-loadData();
+
+if (rawData && !rawData.startsWith('<' + '?')) {
+  try {
+    digestData = JSON.parse(rawData);
+    renderDigest();
+    updateBadge('digest');
+  } catch (e) {
+    console.error("Failed to parse embedded initialData:", e);
+    loadData();
+  }
+} else {
+  loadData();
+}
 </script>
 </body>
 </html>

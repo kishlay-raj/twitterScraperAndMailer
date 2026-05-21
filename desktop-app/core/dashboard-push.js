@@ -63,4 +63,28 @@ function _fetchWithTimeout(url, options, ms) {
     return Promise.race([fetch(url, options), timeout]);
 }
 
-module.exports = { pushDigestUpdate, pushProjectUpdate };
+/**
+ * Fetch all processed tweet IDs from the GAS dashboard.
+ * @param {string} webhookUrl - The GAS Web App URL
+ * @returns {Promise<string[]>} Array of tweet IDs
+ */
+async function fetchProcessedTweetIds(webhookUrl) {
+    if (!webhookUrl) return [];
+    try {
+        const res = await _fetchWithTimeout(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'get_processed_ids' })
+        }, PUSH_TIMEOUT_MS);
+        
+        const data = await res.json();
+        if (data.ok && Array.isArray(data.ids)) {
+            return data.ids;
+        }
+    } catch (err) {
+        logger.add(`[Dashboard] ⚠️ Failed to fetch processed IDs: ${err.message}`, 'warn');
+    }
+    return [];
+}
+
+module.exports = { pushDigestUpdate, pushProjectUpdate, fetchProcessedTweetIds };
