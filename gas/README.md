@@ -39,6 +39,10 @@ Two files to copy into a Google Apps Script project:
 5. Copy the **Web app URL** — it looks like:
    `https://script.google.com/macros/s/AKfycb.../exec`
 
+> [!TIP]
+> **Safari/iOS Support**: If you are using Safari (desktop or mobile) and are logged into multiple Google accounts, Safari's Intelligent Tracking Prevention (ITP) blocks the cookies needed to select a session. You can completely bypass this check by modifying the URL to use Google's wildcard directory:
+> `https://script.google.com/a/*/macros/s/AKfycb.../exec`
+
 ---
 
 ## Step 4 — Configure Electron App

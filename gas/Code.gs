@@ -26,12 +26,14 @@ const P = { id:0, ts:1, ver:2, title:3, summary:4, changes:5, tags:6, isRead:7, 
 // ── WEB APP ENTRY POINTS ──────────────────────────────────────────────────────
 
 function doGet(e) {
+  const callback = e && e.parameter && e.parameter.callback;
+
   // ?markRead=id&type=digest  — lightweight read-tracking from GET request
   if (e && e.parameter && e.parameter.markRead) {
     const id   = e.parameter.markRead;
     const type = e.parameter.type || 'digest';
     _setRead(id, type);
-    return ContentService.createTextOutput("OK");
+    return _jsonpOrTextResponse({ ok: true }, callback);
   }
   if (e && e.parameter && e.parameter.clearData === 'true') {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -41,17 +43,17 @@ function doGet(e) {
         sheet.deleteRows(2, sheet.getLastRow() - 1);
       }
     });
-    return ContentService.createTextOutput("Data cleared.");
+    return _jsonpOrTextResponse({ message: "Data cleared." }, callback);
   }
   if (e && e.parameter && e.parameter.action) {
     const action = e.parameter.action;
     if (action === 'getDigestData') {
-      return _jsonResponse(getDigestData());
+      return _jsonpOrTextResponse(getDigestData(), callback);
     }
     if (action === 'markAllAsRead') {
       const type = e.parameter.type || 'digest';
-      markAllAsRead(type);
-      return ContentService.createTextOutput("OK");
+      const result = markAllAsRead(type);
+      return _jsonpOrTextResponse(result, callback);
     }
   }
 
@@ -279,14 +281,22 @@ function _jsonResponse(data) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-/** Escapes special characters in JSON strings so they can be safely put in a single-quoted JS literal. */
-function escapeJsString(str) {
-  if (!str) return '';
-  return str
-    .replace(/\\/g, '\\\\')
-    .replace(/'/g, "\\'")
-    .replace(/\n/g, '\\n')
-    .replace(/\r/g, '\\r')
+function _jsonpOrTextResponse(data, callback) {
+  if (callback) {
+    const output = callback + '(' + JSON.stringify(data) + ');';
+    return ContentService.createTextOutput(output)
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return ContentService.createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/** Safely stringify JSON data for embedding inside script tags in HTML. */
+function safeJsonStringify(data) {
+  if (data === undefined) return '[]';
+  return JSON.stringify(data)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
     .replace(/\u2028/g, '\\u2028')
     .replace(/\u2029/g, '\\u2029');
 }

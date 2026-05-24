@@ -134,6 +134,119 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   .date-btn { padding: 6px 12px; }
   input[type="date"] { flex: 1; min-width: 120px; }
 }
+
+/* Timer Badge Styles */
+.timer-badge {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: monospace;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.timer-badge:hover {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.timer-badge.warning {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #fee2e2;
+  animation: timerPulse 1s infinite alternate;
+}
+@keyframes timerPulse {
+  from { transform: scale(1); }
+  to { transform: scale(1.03); }
+}
+
+/* Timeout Dialog Styles */
+dialog#timeout-modal {
+  border: none;
+  background: transparent;
+  padding: 0;
+  overflow: visible;
+  outline: none;
+}
+dialog#timeout-modal::backdrop {
+  background-color: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.modal-content {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  width: 90vw;
+  max-width: 420px;
+  padding: 36px 32px;
+  text-align: center;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  color: var(--text);
+  box-sizing: border-box;
+}
+.modal-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  animation: float 2s ease-in-out infinite alternate;
+}
+@keyframes float {
+  0% { transform: translateY(0px); }
+  100% { transform: translateY(-8px); }
+}
+.modal-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text);
+  margin-bottom: 12px;
+  letter-spacing: -0.5px;
+}
+.modal-body {
+  font-size: 14px;
+  color: var(--text3);
+  margin-bottom: 24px;
+  line-height: 1.6;
+}
+.timeout-clock {
+  font-family: monospace;
+  font-size: 40px;
+  font-weight: 800;
+  color: #ef4444;
+  margin: 20px 0;
+  letter-spacing: 1px;
+  text-shadow: 0 2px 4px rgba(239, 68, 68, 0.15);
+}
+[data-theme="dark"] .timeout-clock {
+  color: #f87171;
+  text-shadow: 0 2px 8px rgba(248, 113, 113, 0.25);
+}
+.modal-btn {
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  color: #fff;
+  border: none;
+  padding: 14px 28px;
+  font-size: 15px;
+  font-weight: 700;
+  border-radius: 12px;
+  cursor: pointer;
+  width: 100%;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);
+}
+.modal-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(79, 70, 229, 0.35);
+}
+.modal-btn:active {
+  transform: translateY(0);
+}
 </style>
 </head>
 <body>
@@ -141,6 +254,9 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 <div class="header">
   <h1>🛰️ DailyUpdates Hub</h1>
   <div class="header-right">
+    <div class="timer-badge" id="countdown-timer" onclick="resetTimer()" title="Click to restart timer">
+      <span>⏳</span> <span id="timer-display">05:00</span>
+    </div>
     <button class="btn-icon" onclick="markAllRead()">✓ All Read</button>
     <button class="btn-icon" onclick="loadData()">⟳ Refresh</button>
     <button class="dark-toggle" id="dark-btn" onclick="toggleDark()" title="Toggle dark mode">🌙</button>
@@ -173,53 +289,147 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
     <div id="digest-feed"><div class="loading">Loading digest...</div></div>
   </div>
 
-
+<script id="initial-data" type="application/json">
+  <?!= typeof initialData !== "undefined" ? safeJsonStringify(initialData) : "[]" ?>
+</script>
 
 <script>
 let digestData = [], projectData = [];
 let activeCat  = 'all', activeTab = 'digest';
+let deepLinkHandled = false;
+let dateFilterInitialized = false;
 
-// Embedded initial data injected by Google Apps Script template engine
-const rawData = '<?!= typeof initialData !== "undefined" ? escapeJsString(JSON.stringify(initialData)) : "" ?>';
-const GAS_URL = '<?!= typeof gasUrl !== "undefined" ? gasUrl : "" ?>';
+// Dynamically determine base URL from document.referrer if possible to handle wildcard /a/*/ routing.
+let derivedGasUrl = '';
+try {
+  const ref = document.referrer;
+  if (ref && (ref.indexOf('/macros/s/') !== -1 || ref.indexOf('/a/') !== -1)) {
+    const idx = ref.indexOf('/exec');
+    if (idx !== -1) {
+      derivedGasUrl = ref.substring(0, idx + 5);
+    } else {
+      derivedGasUrl = ref;
+    }
+  }
+} catch (_) {}
+
+const GAS_URL = derivedGasUrl || '<?!= typeof gasUrl !== "undefined" ? gasUrl : "" ?>';
+
+// Detect Safari / iOS to bypass standard google.script.run
+const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent) || 
+                 /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+                 (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+// JSONP helper for cross-origin GET requests to GAS backend
+function callGasApiJsonp(params, onSuccess, onError) {
+  if (!GAS_URL || GAS_URL.startsWith('<' + '?')) {
+    if (onError) onError(new Error("GAS_URL is not defined or invalid."));
+    return;
+  }
+  
+  const cbName = 'jsonp_cb_' + Date.now() + '_' + Math.floor(Math.random() * 1000000);
+  
+  window[cbName] = function(data) {
+    cleanup();
+    if (onSuccess) onSuccess(data);
+  };
+  
+  const script = document.createElement('script');
+  const scriptId = 'jsonp_script_' + cbName;
+  script.id = scriptId;
+  
+  function cleanup() {
+    try {
+      delete window[cbName];
+    } catch (_) {}
+    const el = document.getElementById(scriptId);
+    if (el) el.remove();
+  }
+  
+  script.onerror = function() {
+    cleanup();
+    if (onError) onError(new Error("JSONP request failed (network error or blocked)."));
+  };
+  
+  const queryParams = new URLSearchParams(params);
+  queryParams.set('callback', cbName);
+  
+  script.src = GAS_URL + '?' + queryParams.toString();
+  document.body.appendChild(script);
+}
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
-function loadData() {
-  const useFetch = function() {
-    if (!GAS_URL || GAS_URL.startsWith('<' + '?')) {
-      console.error('GAS_URL is not defined or invalid.');
-      return;
+function initDateFilter() {
+  if (dateFilterInitialized) return;
+  const dateEl = document.getElementById('digest-date-filter');
+  if (!dateEl) return;
+  
+  const formatLocalDate = (d) => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+  
+  const todayStr = formatLocalDate(new Date());
+  
+  const hasDateData = (dateStr) => {
+    return digestData.some(d => {
+      try {
+        const itemDateStr = formatLocalDate(new Date(d.timestamp));
+        return itemDateStr === dateStr;
+      } catch (_) {
+        return false;
+      }
+    });
+  };
+  
+  if (hasDateData(todayStr)) {
+    dateEl.value = todayStr;
+  } else if (digestData && digestData.length > 0) {
+    try {
+      dateEl.value = formatLocalDate(new Date(digestData[0].timestamp));
+    } catch (_) {
+      dateEl.value = todayStr;
     }
-    fetch(GAS_URL + '?action=getDigestData', { redirect: 'follow' })
-      .then(res => {
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        return res.json();
-      })
-      .then(d => {
+  } else {
+    dateEl.value = todayStr;
+  }
+  dateFilterInitialized = true;
+}
+
+function loadData() {
+  const useJsonp = function() {
+    callGasApiJsonp(
+      { action: 'getDigestData' },
+      function(d) {
         digestData = d;
+        initDateFilter();
         renderDigest();
         updateBadge('digest');
-      })
-      .catch(err => {
-        console.error('Fetch failed:', err);
+      },
+      function(err) {
+        console.error('JSONP failed:', err);
         document.getElementById('digest-feed').innerHTML = '<div class="empty">❌ Failed to load digest: ' + err.message + '</div>';
-      });
+      }
+    );
   };
 
-  if (typeof google !== 'undefined' && google.script && google.script.run) {
+  if (!isSafari && typeof google !== 'undefined' && google.script && google.script.run) {
     google.script.run
       .withSuccessHandler(d => {
         digestData = d;
+        initDateFilter();
         renderDigest();
         updateBadge('digest');
       })
       .withFailureHandler(e => {
-        console.warn('google.script.run getDigestData failed, trying fetch...', e);
-        useFetch();
+        console.warn('google.script.run getDigestData failed, trying JSONP...', e);
+        useJsonp();
       })
       .getDigestData();
   } else {
-    useFetch();
+    useJsonp();
   }
 }
 
@@ -254,10 +464,70 @@ function stepDate(type, offset) {
 // ── RENDER DIGEST ─────────────────────────────────────────────────────────────
 function renderDigest() {
   const unreadOnly = document.getElementById('unread-only-digest').checked;
-  const dateFilter = document.getElementById('digest-date-filter').value;
+  let dateFilter = document.getElementById('digest-date-filter').value;
+  
+  // Deep-Link check: check if we have a target in query params
+  const urlParams = new URLSearchParams(window.location.search);
+  const targetDigestId = urlParams.get('digest');
+  const targetVideoId = urlParams.get('video');
+  
+  let targetItem = null;
+  let shouldScroll = false;
+  if ((targetDigestId || targetVideoId) && !deepLinkHandled) {
+    if (targetDigestId) {
+      targetItem = digestData.find(d => String(d.runId) === String(targetDigestId));
+    } else if (targetVideoId) {
+      for (const d of digestData) {
+        if (d.tweets && d.tweets.some(t => String(t.id) === String(targetVideoId))) {
+          targetItem = d;
+          break;
+        }
+        if (d.profiles) {
+          for (const p of d.profiles) {
+            if (p.tweets && p.tweets.some(t => String(t.id) === String(targetVideoId))) {
+              targetItem = d;
+              break;
+            }
+          }
+        }
+        if (targetItem) break;
+      }
+    }
+
+    if (targetItem) {
+      // Clear filters that might hide the target item
+      if (unreadOnly && targetItem.isRead) {
+        document.getElementById('unread-only-digest').checked = false;
+      }
+      if (activeCat !== 'all' && targetItem.category !== activeCat) {
+        activeCat = 'all';
+        document.querySelectorAll('#digest-filters .chip').forEach(c => {
+          if (c.dataset.cat === 'all') c.classList.add('active');
+          else c.classList.remove('active');
+        });
+      }
+      
+      if (dateFilter) {
+        const formatLocalDate = (d) => {
+          const yyyy = d.getFullYear();
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          const dd = String(d.getDate()).padStart(2, '0');
+          return `${yyyy}-${mm}-${dd}`;
+        };
+        const itemDateStr = formatLocalDate(new Date(targetItem.timestamp));
+        if (itemDateStr !== dateFilter) {
+          document.getElementById('digest-date-filter').value = '';
+          dateFilter = '';
+        }
+      }
+      deepLinkHandled = true;
+      shouldScroll = true;
+    }
+  }
+
   let items = digestData;
   if (activeCat !== 'all') items = items.filter(d => d.category === activeCat);
-  if (unreadOnly) items = items.filter(d => !d.isRead);
+  if (document.getElementById('unread-only-digest').checked) items = items.filter(d => !d.isRead);
   if (dateFilter) {
     items = items.filter(d => {
       try { return new Date(d.timestamp).toISOString().slice(0,10) === dateFilter; }
@@ -281,6 +551,53 @@ function renderDigest() {
     c.onclick = () => filterCat(c, 'digest');
     fc.appendChild(c);
   });
+
+  // Handle scrolling to deep-linked card
+  if (shouldScroll && targetItem) {
+    setTimeout(() => {
+      const cardEl = document.getElementById('card-' + targetItem.runId);
+      if (cardEl) {
+        cardEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        
+        // Expand the full analysis
+        const expandBtn = cardEl.querySelector('.btn-expand');
+        if (expandBtn) {
+          const deepSec = cardEl.querySelector('.deep-section');
+          if (deepSec && !deepSec.classList.contains('open')) {
+            toggleDeep(expandBtn, 'deep-' + targetItem.runId);
+          }
+        }
+        
+        // If it's a target video, expand the tweets section containing it
+        if (targetVideoId) {
+          const activeProfiles = targetItem.profiles.filter(p => (p.tweets && p.tweets.length > 0) || p.aiSummary);
+          const inactiveProfiles = targetItem.profiles.filter(p => !((p.tweets && p.tweets.length > 0) || p.aiSummary));
+          
+          let actIdx = activeProfiles.findIndex(p => p.tweets && p.tweets.some(t => String(t.id) === String(targetVideoId)));
+          let suffix = '';
+          let tweetCount = 0;
+          if (actIdx !== -1) {
+            suffix = `act-${actIdx}`;
+            tweetCount = activeProfiles[actIdx].tweets.length;
+          } else {
+            let inactIdx = inactiveProfiles.findIndex(p => p.tweets && p.tweets.some(t => String(t.id) === String(targetVideoId)));
+            if (inactIdx !== -1) {
+              suffix = `inact-${inactIdx}`;
+              tweetCount = inactiveProfiles[inactIdx].tweets.length;
+            }
+          }
+          
+          if (suffix) {
+            const tbId = `tweets-${targetItem.runId}-${suffix}`;
+            const btn = cardEl.querySelector(`button[onclick*="${tbId}"]`);
+            if (btn) {
+              toggleTweets(btn, tbId, tweetCount);
+            }
+          }
+        }
+      }
+    }, 150);
+  }
 }
 
 function digestCard(d) {
@@ -440,21 +757,27 @@ function markRead(id, type, btn) {
   updateBadge(type === 'digest' ? 'digest' : 'project');
 
   // 2. Background sync
-  const useFetch = function() {
-    if (!GAS_URL || GAS_URL.startsWith('<' + '?')) return;
-    fetch(GAS_URL + '?markRead=' + encodeURIComponent(id) + '&type=' + encodeURIComponent(type), { mode: 'no-cors' })
-      .catch(e => console.error('Optimistic background markRead sync failed:', e));
+  const useJsonp = function() {
+    callGasApiJsonp(
+      { markRead: id, type: type },
+      function(res) {
+        console.log('Background markRead synced:', res);
+      },
+      function(err) {
+        console.error('Optimistic background markRead sync failed:', err);
+      }
+    );
   };
 
-  if (typeof google !== 'undefined' && google.script && google.script.run) {
+  if (!isSafari && typeof google !== 'undefined' && google.script && google.script.run) {
     google.script.run
       .withFailureHandler(e => {
-        console.warn('google.script.run markAsRead failed, trying fetch...', e);
-        useFetch();
+        console.warn('google.script.run markAsRead failed, trying JSONP...', e);
+        useJsonp();
       })
       .markAsRead(id, type);
   } else {
-    useFetch();
+    useJsonp();
   }
 }
 
@@ -465,21 +788,27 @@ function markAllRead() {
   updateBadge('digest');
 
   // 2. Background sync
-  const useFetch = function() {
-    if (!GAS_URL || GAS_URL.startsWith('<' + '?')) return;
-    fetch(GAS_URL + '?action=markAllAsRead&type=digest', { mode: 'no-cors' })
-      .catch(e => console.error('Optimistic background markAllAsRead failed:', e));
+  const useJsonp = function() {
+    callGasApiJsonp(
+      { action: 'markAllAsRead', type: 'digest' },
+      function(res) {
+        console.log('Background markAllAsRead synced:', res);
+      },
+      function(err) {
+        console.error('Optimistic background markAllAsRead failed:', err);
+      }
+    );
   };
 
-  if (typeof google !== 'undefined' && google.script && google.script.run) {
+  if (!isSafari && typeof google !== 'undefined' && google.script && google.script.run) {
     google.script.run
       .withFailureHandler(e => {
-        console.warn('google.script.run markAllAsRead failed, trying fetch...', e);
-        useFetch();
+        console.warn('google.script.run markAllAsRead failed, trying JSONP...', e);
+        useJsonp();
       })
       .markAllAsRead('digest');
   } else {
-    useFetch();
+    useJsonp();
   }
 }
 
@@ -522,6 +851,111 @@ function setDark(dark) {
   try { localStorage.setItem('du_theme', dark ? 'dark' : 'light'); } catch(_) {}
 }
 
+// ── TIMEOUT TIMER SYSTEM ──────────────────────────────────────────────────────
+let countdownSeconds = 300; // 5 minutes
+let elapsedTimeoutSeconds = 0;
+let countdownInterval = null;
+let timeoutInterval = null;
+
+function startCountdown() {
+  clearInterval(countdownInterval);
+  clearInterval(timeoutInterval);
+  
+  countdownSeconds = 300;
+  updateCountdownDisplay();
+  
+  const timerBadge = document.getElementById('countdown-timer');
+  if (timerBadge) {
+    timerBadge.classList.remove('warning');
+  }
+  
+  countdownInterval = setInterval(() => {
+    countdownSeconds--;
+    updateCountdownDisplay();
+    
+    if (countdownSeconds <= 60 && timerBadge) {
+      timerBadge.classList.add('warning');
+    }
+    
+    if (countdownSeconds <= 0) {
+      clearInterval(countdownInterval);
+      triggerTimeout();
+    }
+  }, 1000);
+}
+
+function updateCountdownDisplay() {
+  const display = document.getElementById('timer-display');
+  if (!display) return;
+  const mins = Math.floor(countdownSeconds / 60);
+  const secs = countdownSeconds % 60;
+  display.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+function triggerTimeout() {
+  const modal = document.getElementById('timeout-modal');
+  if (modal) {
+    modal.showModal();
+  }
+  
+  elapsedTimeoutSeconds = 0;
+  updateTimeoutElapsedDisplay();
+  
+  clearInterval(timeoutInterval);
+  timeoutInterval = setInterval(() => {
+    elapsedTimeoutSeconds++;
+    updateTimeoutElapsedDisplay();
+  }, 1000);
+}
+
+function updateTimeoutElapsedDisplay() {
+  const display = document.getElementById('timeout-elapsed');
+  if (!display) return;
+  const mins = Math.floor(elapsedTimeoutSeconds / 60);
+  const secs = elapsedTimeoutSeconds % 60;
+  display.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+function resetTimer() {
+  const modal = document.getElementById('timeout-modal');
+  if (modal) {
+    modal.close();
+  }
+  startCountdown();
+}
+
+function resetCountdownOnActivity() {
+  const modal = document.getElementById('timeout-modal');
+  if (modal && modal.open) return;
+
+  countdownSeconds = 300;
+  updateCountdownDisplay();
+  const timerBadge = document.getElementById('countdown-timer');
+  if (timerBadge) {
+    timerBadge.classList.remove('warning');
+  }
+}
+
+// Reset timer on user activity
+['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'].forEach(evt => {
+  document.addEventListener(evt, () => {
+    if (countdownSeconds < 295) {
+      resetCountdownOnActivity();
+    }
+  }, { passive: true });
+});
+
+// Setup dialog cancel/escape handler
+document.addEventListener('DOMContentLoaded', () => {
+  const modal = document.getElementById('timeout-modal');
+  if (modal) {
+    modal.addEventListener('cancel', (e) => {
+      e.preventDefault();
+      resetTimer();
+    });
+  }
+});
+
 // ── BOOT ──────────────────────────────────────────────────────────────────────
 (function() {
   try {
@@ -531,18 +965,43 @@ function setDark(dark) {
   } catch(_) {}
 })();
 
-if (rawData && !rawData.startsWith('<' + '?')) {
-  try {
-    digestData = JSON.parse(rawData);
-    renderDigest();
-    updateBadge('digest');
-  } catch (e) {
-    console.error("Failed to parse embedded initialData:", e);
-    loadData();
+let initialDataParsed = false;
+try {
+  const initialDataEl = document.getElementById('initial-data');
+  if (initialDataEl) {
+    const rawContent = initialDataEl.textContent.trim();
+    if (rawContent && !rawContent.startsWith('<' + '?')) {
+      digestData = JSON.parse(rawContent);
+      if (Array.isArray(digestData) && digestData.length > 0) {
+        initialDataParsed = true;
+      }
+    }
   }
+} catch (e) {
+  console.error("Failed to parse embedded initialData:", e);
+}
+
+if (initialDataParsed) {
+  initDateFilter();
+  renderDigest();
+  updateBadge('digest');
 } else {
   loadData();
 }
+
+// Start the 5 minutes countdown session timer
+startCountdown();
 </script>
+
+<dialog id="timeout-modal">
+  <div class="modal-content">
+    <div class="modal-icon">⏰</div>
+    <div class="modal-title">Session Timeout</div>
+    <p class="modal-body">Your session has timed out. Time elapsed since timeout:</p>
+    <div class="timeout-clock" id="timeout-elapsed">00:00</div>
+    <button class="modal-btn" onclick="resetTimer()">Extend Session</button>
+  </div>
+</dialog>
+
 </body>
 </html>
