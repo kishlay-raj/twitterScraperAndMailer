@@ -299,16 +299,22 @@ let activeCat  = 'all', activeTab = 'digest';
 let deepLinkHandled = false;
 let dateFilterInitialized = false;
 
-// Dynamically determine base URL from document.referrer if possible to handle wildcard /a/*/ routing.
+// Dynamically determine base URL from query parameter or document.referrer
 let derivedGasUrl = '';
 try {
-  const ref = document.referrer;
-  if (ref && (ref.indexOf('/macros/s/') !== -1 || ref.indexOf('/a/') !== -1)) {
-    const idx = ref.indexOf('/exec');
-    if (idx !== -1) {
-      derivedGasUrl = ref.substring(0, idx + 5);
-    } else {
-      derivedGasUrl = ref;
+  const urlParams = new URLSearchParams(window.location.search);
+  const qGasUrl = urlParams.get('gasUrl');
+  if (qGasUrl) {
+    derivedGasUrl = qGasUrl;
+  } else {
+    const ref = document.referrer;
+    if (ref && (ref.indexOf('/macros/s/') !== -1 || ref.indexOf('/a/') !== -1)) {
+      const idx = ref.indexOf('/exec');
+      if (idx !== -1) {
+        derivedGasUrl = ref.substring(0, idx + 5);
+      } else {
+        derivedGasUrl = ref;
+      }
     }
   }
 } catch (_) {}
@@ -323,7 +329,7 @@ const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent) ||
 // JSONP helper for cross-origin GET requests to GAS backend
 function callGasApiJsonp(params, onSuccess, onError) {
   if (!GAS_URL || GAS_URL.startsWith('<' + '?')) {
-    if (onError) onError(new Error("GAS_URL is not defined or invalid."));
+    if (onError) onError(new Error("GAS_URL is not defined or invalid. Use ?gasUrl= query parameter to specify it locally."));
     return;
   }
   
@@ -410,7 +416,23 @@ function loadData() {
       },
       function(err) {
         console.error('JSONP failed:', err);
-        document.getElementById('digest-feed').innerHTML = '<div class="empty">❌ Failed to load digest: ' + err.message + '</div>';
+        if (err.message && err.message.includes("GAS_URL")) {
+          document.getElementById('digest-feed').innerHTML = `
+            <div class="empty" style="text-align: left; max-width: 500px; margin: 40px auto; padding: 24px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface2); box-shadow: var(--card-shadow);">
+              <h3 style="margin-bottom: 12px; color: var(--text); font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px;">🔗 Connect Local Dashboard</h3>
+              <p style="font-size: 13px; color: var(--text3); margin-bottom: 14px; line-height: 1.5;">
+                To view live data on your local server, append your Google Apps Script Web App URL to the browser address bar:
+              </p>
+              <code style="display: block; background: var(--surface); padding: 10px; border-radius: 8px; font-size: 11px; margin-bottom: 14px; word-break: break-all; color: var(--indigo); border: 1px solid var(--border); font-family: monospace;">
+                http://localhost:8080/dashboard.html?gasUrl=YOUR_WEB_APP_URL
+              </code>
+              <p style="font-size: 11px; color: var(--text4); line-height: 1.4;">
+                Your Web App URL can be found under <strong>Deploy &gt; Manage deployments</strong> inside the Google Apps Script project.
+              </p>
+            </div>`;
+        } else {
+          document.getElementById('digest-feed').innerHTML = '<div class="empty">❌ Failed to load digest: ' + err.message + '</div>';
+        }
       }
     );
   };
