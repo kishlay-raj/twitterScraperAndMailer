@@ -936,8 +936,8 @@ function resetCountdownOnActivity() {
   }
 }
 
-// Reset timer on user activity
-['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'].forEach(evt => {
+// Reset timer on intentional user activity only (not scroll/mousemove which fire continuously)
+['mousedown', 'keypress', 'touchstart', 'click'].forEach(evt => {
   document.addEventListener(evt, () => {
     if (countdownSeconds < 295) {
       resetCountdownOnActivity();
